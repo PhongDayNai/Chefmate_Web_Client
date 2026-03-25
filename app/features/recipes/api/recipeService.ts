@@ -33,4 +33,10 @@ export const recipeService = {
     const res = await axios.post(`${BASE_URL}/user-recipes`, { userId });
     return res.data;
   },
+  createRecipe: async (formData: FormData) => {
+    const res = await axios.post(`${BASE_URL}/create`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    });
+    return res.data;
+  },
 };

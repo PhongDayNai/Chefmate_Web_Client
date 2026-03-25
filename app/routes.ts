@@ -10,6 +10,7 @@ export default [
     route("profile", "routes/profile.tsx"),
     route("tag/:tagName", "routes/tag-results.tsx"),
     route("search", "routes/search-results.tsx"),
+    route("create-recipe", "routes/create-recipe.tsx"),
   ]),
 
   route("auth", "routes/auth.tsx"),

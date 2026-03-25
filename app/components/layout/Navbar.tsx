@@ -1,11 +1,19 @@
 // app/components/layout/Navbar.tsx
 import { Link, useNavigate } from "react-router";
-import { Refrigerator, Home, LogOut, Search as SearchIcon } from "lucide-react";
+import { 
+  Refrigerator, 
+  Home, 
+  LogOut, 
+  Search as SearchIcon, 
+  PlusCircle 
+} from "lucide-react";
 import { useState } from "react";
 
 export default function Navbar() {
   const navigate = useNavigate();
   const [keyword, setKeyword] = useState("");
+  
+  // Lấy dữ liệu an toàn từ localStorage
   const userName = typeof window !== "undefined" ? localStorage.getItem("userName") : "";
 
   const handleSearch = (e: React.FormEvent) => {
@@ -42,34 +50,42 @@ export default function Navbar() {
           <SearchIcon className="absolute left-4 top-2.5 w-4 h-4 text-gray-400 group-focus-within:text-[#f59127]" />
         </form>
 
-        {/* Menu điều hướng */}
-        <div className="flex items-center gap-4 md:gap-6 flex-shrink-0">
-          <Link to="/" className="flex items-center gap-1 text-gray-600 hover:text-[#f59127] transition-colors">
-            <Home className="w-5 h-5" />
-            <span className="text-sm font-bold hidden lg:block">Trang chủ</span>
+        {/* Menu điều hướng & Actions */}
+        <div className="flex items-center gap-3 md:gap-5 flex-shrink-0">
+          
+          {/* Nút Điều hướng chính */}
+          <div className="flex items-center gap-4 mr-2">
+            <Link to="/" className="flex items-center gap-1 text-gray-600 hover:text-[#f59127] transition-colors">
+              <Home className="w-5 h-5" />
+              <span className="text-sm font-bold hidden lg:block">Trang chủ</span>
+            </Link>
+
+            <Link to="/pantry" className="flex items-center gap-1 text-gray-600 hover:text-[#f59127] transition-colors">
+              <Refrigerator className="w-5 h-5" />
+              <span className="text-sm font-bold hidden lg:block">Tủ lạnh</span>
+            </Link>
+          </div>
+
+          {/* NÚT ĐĂNG MÓN - NỔI BẬT */}
+          <Link 
+            to="/create-recipe" 
+            className="flex items-center gap-2 px-4 py-2 bg-[#f59127] text-white rounded-xl font-bold hover:bg-[#e07d16] transition-all shadow-md shadow-orange-100 active:scale-95"
+          >
+            <PlusCircle size={18} />
+            <span className="text-sm hidden md:block">Đăng món</span>
           </Link>
 
-          <Link to="/pantry" className="flex items-center gap-1 text-gray-600 hover:text-[#f59127] transition-colors">
-            <Refrigerator className="w-5 h-5" />
-            <span className="text-sm font-bold hidden lg:block">Tủ lạnh</span>
-          </Link>
+          <div className="h-6 w-[1px] bg-gray-200 hidden sm:block"></div>
 
-          <div className="h-6 w-[1px] bg-gray-200 mx-1 hidden sm:block"></div>
-
-          {/* Thông tin User */}
+          {/* Thông tin User & Logout */}
           <div className="flex items-center gap-3">
-            <span className="hidden xl:block text-sm font-medium text-gray-600">
-              Chào, {userName ? userName.split(' ').pop() : "Bạn"}
-            </span>
+            <div className="hidden xl:flex flex-col items-end">
+              <span className="text-[10px] text-gray-400 font-black uppercase tracking-widest leading-none mb-1">Đầu bếp</span>
+              <span className="text-sm font-bold text-gray-700 leading-none">
+                {userName ? userName.split(' ').pop() : "Bạn"}
+              </span>
+            </div>
             
-            <button 
-              onClick={handleLogout}
-              className="p-2 text-gray-400 hover:text-red-500 transition-colors"
-              title="Đăng xuất"
-            >
-              <LogOut className="w-5 h-5" />
-            </button>
-
             <Link 
               to="/profile" 
               title="Trang cá nhân"
@@ -77,6 +93,14 @@ export default function Navbar() {
             >
               {userName ? userName.charAt(0).toUpperCase() : "U"}
             </Link>
+
+            <button 
+              onClick={handleLogout}
+              className="p-2 text-gray-400 hover:text-red-500 transition-colors"
+              title="Đăng xuất"
+            >
+              <LogOut className="w-5 h-5" />
+            </button>
           </div>
         </div>
       </div>
