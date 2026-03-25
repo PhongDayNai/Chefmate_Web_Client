@@ -7,6 +7,15 @@ const API_URL = "https://your-api-url.com/api/users";
 export const authService = {
   login: async (identifier: string, password: string): Promise<AuthResponse> => {
     const response = await axios.post(`${API_URL}/login`, { identifier, password });
+    if (response.data.success) {
+      const data = response.data.data;
+      localStorage.setItem("userId", data.userId);
+      localStorage.setItem("userName", data.fullName);
+      
+      // THÊM 2 DÒNG NÀY VÀO ĐÂY:
+      localStorage.setItem("userPhone", data.phone);
+      localStorage.setItem("userEmail", data.email);
+    }
     return response.data;
   },
   
