@@ -1,6 +1,5 @@
 {
   "version": 2,
-  "public": true,
   "framework": "react-router",
   "rewrites": [
     {
@@ -8,4 +7,4 @@
       "destination": "/"
     }
   ]
-}
+}   
