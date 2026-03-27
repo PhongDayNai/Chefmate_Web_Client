@@ -2,17 +2,18 @@
 import { useEffect, useState } from "react";
 import { userService } from "~/features/users/api/userService";
 import { recipeService } from "~/features/recipes/api/recipeService";
-import { dietNoteService } from "~/features/users/api/dietNoteService"; 
+import { dietNoteService } from "~/features/users/api/dietNoteService";
+import { useAuthGuard } from "~/hooks/useAuthGuard";
 import RecipeCard from "~/features/recipes/components/RecipeCard";
-import { 
-  User, 
-  Lock, 
-  History, 
-  Save, 
-  Utensils, 
-  ShieldAlert, 
-  Plus, 
-  X, 
+import {
+  User,
+  Lock,
+  History,
+  Save,
+  Utensils,
+  ShieldAlert,
+  Plus,
+  X,
   HeartPulse,
   Phone,
   Mail
@@ -20,6 +21,7 @@ import {
 import toast from "react-hot-toast";
 
 export default function ProfilePage() {
+  const { requireAuth } = useAuthGuard();
   const [activeTab, setActiveTab] = useState("info");
   const [history, setHistory] = useState([]);
   const [myRecipes, setMyRecipes] = useState([]);
@@ -60,13 +62,16 @@ export default function ProfilePage() {
 
   const handleUpdateInfo = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (!requireAuth()) return;
+
     if (!userId) return;
 
-    const res = await userService.updateInfo({ 
-      userId: parseInt(userId), 
+    const res = await userService.updateInfo({
+      userId: parseInt(userId),
       fullName: user.fullName,
       email: user.email,
-      phone: user.phone 
+      phone: user.phone
     });
 
     if (res.success) {
@@ -74,18 +79,22 @@ export default function ProfilePage() {
       localStorage.setItem("userName", res.data.fullName);
       localStorage.setItem("userPhone", res.data.phone);
       localStorage.setItem("userEmail", res.data.email);
-      
+
       toast.success("Cập nhật thông tin thành công!");
     }
   };
 
   const handleChangePass = async (e: React.FormEvent) => {
     e.preventDefault();
-    const res = await userService.changePassword({ 
-      phone: user.phone, 
-      currentPassword: pass.current, 
-      newPassword: pass.new 
+
+    if (!requireAuth()) return;
+
+    const res = await userService.changePassword({
+      phone: user.phone,
+      currentPassword: pass.current,
+      newPassword: pass.new
     });
+
     if (res.success) {
       toast.success("Đổi mật khẩu thành công!");
       setPass({ current: "", new: "" });
@@ -96,6 +105,9 @@ export default function ProfilePage() {
 
   const handleAddDietNote = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (!requireAuth()) return;
+
     if (!newNote.label.trim()) return;
 
     const res = await dietNoteService.upsertNote({
@@ -114,6 +126,8 @@ export default function ProfilePage() {
   };
 
   const handleDeleteDietNote = async (noteId: number) => {
+    if (!requireAuth()) return;
+
     const res = await dietNoteService.deleteNote(parseInt(userId!), noteId);
     if (res.success) {
       toast.success("Đã xóa ghi chú");

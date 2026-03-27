@@ -2,13 +2,14 @@
 import { useState } from "react";
 import { useNavigate } from "react-router";
 import { recipeService } from "~/features/recipes/api/recipeService";
-import { 
-  Camera, 
-  Plus, 
-  Trash2, 
-  Clock, 
-  Users, 
-  ChefHat, 
+import { useAuthGuard } from "~/hooks/useAuthGuard";
+import {
+  Camera,
+  Plus,
+  Trash2,
+  Clock,
+  Users,
+  ChefHat,
   ChevronLeft,
   ArrowRight,
   Hash,
@@ -18,6 +19,7 @@ import toast from "react-hot-toast";
 
 export default function CreateRecipe() {
   const navigate = useNavigate();
+  const { requireAuth } = useAuthGuard();
   const [loading, setLoading] = useState(false);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   
@@ -71,10 +73,13 @@ export default function CreateRecipe() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const userId = localStorage.getItem("userId");
-    if (!userId) return toast.error("Vui lòng đăng nhập!");
+
+    // Check authentication
+    if (!requireAuth()) return;
+
     if (!formData.image) return toast.error("Vui lòng chọn ảnh món ăn!");
 
+    const userId = localStorage.getItem("userId");
     setLoading(true);
     const body = new FormData();
     body.append("recipeName", formData.recipeName);

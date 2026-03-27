@@ -1,14 +1,26 @@
 import axios from "axios";
+import { checkAuth } from "~/utils/authUtils";
+
 const BASE_URL = "https://your-api-url.com/api/interactions";
 
 export const interactionService = {
   // Like hoặc Unlike
   likeRecipe: async (userId: number, recipeId: number) => {
+    // Auth guard for mutation
+    if (!checkAuth()) {
+      throw new Error("AUTH_REQUIRED");
+    }
+
     const res = await axios.post(`${BASE_URL}/like`, { userId, recipeId });
     return res.data;
   },
   // Gửi bình luận
   createComment: async (userId: number, recipeId: number, content: string) => {
+    // Auth guard for mutation
+    if (!checkAuth()) {
+      throw new Error("AUTH_REQUIRED");
+    }
+
     const res = await axios.post(`${BASE_URL}/comment`, { userId, recipeId, content });
     return res.data;
   },
@@ -19,6 +31,11 @@ export const interactionService = {
   },
   // Xóa bình luận
   deleteComment: async (commentId: number) => {
+    // Auth guard for mutation
+    if (!checkAuth()) {
+      throw new Error("AUTH_REQUIRED");
+    }
+
     const res = await axios.delete(`${BASE_URL}/comment`, { data: { commentId } });
     return res.data;
   },

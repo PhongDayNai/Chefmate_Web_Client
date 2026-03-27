@@ -1,4 +1,5 @@
 import axios from "axios";
+import { checkAuth } from "~/utils/authUtils";
 
 const BASE_URL = "https://your-api-url.com/api/recipes";
 
@@ -9,7 +10,7 @@ export const recipeService = {
     });
     return response.data;
   },
-  
+
   getTopTrendingLegacy: async (userId = 0) => {
     const response = await axios.post(`${BASE_URL}/top-trending`, { userId });
     return response.data;
@@ -34,6 +35,11 @@ export const recipeService = {
     return res.data;
   },
   createRecipe: async (formData: FormData) => {
+    // Auth guard for mutation
+    if (!checkAuth()) {
+      throw new Error("AUTH_REQUIRED");
+    }
+
     const res = await axios.post(`${BASE_URL}/create`, formData, {
       headers: { 'Content-Type': 'multipart/form-data' }
     });

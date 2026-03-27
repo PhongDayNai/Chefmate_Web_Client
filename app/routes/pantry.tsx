@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { pantryService } from "~/features/pantry/api/pantryService";
 import PantryItem from "~/features/pantry/components/PantryItem";
 import AddIngredientModal from "~/features/pantry/components/AddIngredientModal";
+import { useAuthGuard } from "~/hooks/useAuthGuard";
 import { Plus, Refrigerator, ChevronLeft } from "lucide-react";
 import { useNavigate } from "react-router";
 import toast from "react-hot-toast";
@@ -9,13 +10,17 @@ import type { PantryItemType } from "~/features/pantry/types";
 
 export default function PantryPage() {
   const navigate = useNavigate();
+  const { requireAuth } = useAuthGuard();
   const [items, setItems] = useState<PantryItemType[]>([]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setModalOpen] = useState(false);
 
   const fetchPantry = async () => {
     const userId = localStorage.getItem("userId");
-    if (!userId) return;
+    if (!userId) {
+      setLoading(false);
+      return;
+    }
     try {
       const res = await pantryService.getByUser(parseInt(userId));
       if (res.success) setItems(res.data);
@@ -27,6 +32,11 @@ export default function PantryPage() {
   };
 
   useEffect(() => { fetchPantry(); }, []);
+
+  const handleOpenModal = () => {
+    if (!requireAuth()) return;
+    setModalOpen(true);
+  };
 
   const handleAddIngredient = async (payload: any) => {
     try {
@@ -42,9 +52,11 @@ export default function PantryPage() {
   };
 
   const handleDelete = async (itemId: number) => {
+    if (!requireAuth()) return;
+
     const userId = localStorage.getItem("userId");
     if (!userId || !confirm("Bạn có chắc muốn bỏ nguyên liệu này?")) return;
-    
+
     try {
       const res = await pantryService.delete(parseInt(userId), itemId);
       if (res.success) {
@@ -68,8 +80,8 @@ export default function PantryPage() {
               <Refrigerator className="text-[#f59127] w-6 h-6" />
               <h1 className="text-xl font-black text-gray-800 uppercase tracking-tighter">Tủ lạnh của tôi</h1>
             </div>
-            <button 
-              onClick={() => setModalOpen(true)}
+            <button
+              onClick={handleOpenModal}
               className="bg-[#f59127cc] text-white p-2.5 rounded-2xl hover:bg-[#f59127] shadow-lg shadow-orange-200 transition-all"
             >
               <Plus className="w-6 h-6" />
@@ -86,7 +98,7 @@ export default function PantryPage() {
             <div className="text-center py-24 bg-white rounded-[3rem] border-2 border-dashed border-gray-100">
               <Refrigerator className="w-20 h-20 text-gray-100 mx-auto mb-6" />
               <p className="text-gray-400 font-bold text-lg">Tủ lạnh của bạn đang trống!</p>
-              <button onClick={() => setModalOpen(true)} className="mt-4 text-[#f59127] font-bold hover:underline">
+              <button onClick={handleOpenModal} className="mt-4 text-[#f59127] font-bold hover:underline">
                 Thêm món đầu tiên ngay
               </button>
             </div>

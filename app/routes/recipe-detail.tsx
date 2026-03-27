@@ -3,15 +3,16 @@ import { useEffect, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router";
 import { recipeService } from "~/features/recipes/api/recipeService";
 import { interactionService } from "~/features/interactions/api/interactionService";
-import { 
-  Clock, 
-  Users, 
-  ChevronLeft, 
-  CheckCircle2, 
-  Heart, 
-  MessageCircle, 
-  Send, 
-  Trash2, 
+import { useAuthGuard } from "~/hooks/useAuthGuard";
+import {
+  Clock,
+  Users,
+  ChevronLeft,
+  CheckCircle2,
+  Heart,
+  MessageCircle,
+  Send,
+  Trash2,
 } from "lucide-react";
 import type { Recipe } from "~/features/recipes/types";
 import toast from "react-hot-toast";
@@ -19,6 +20,7 @@ import toast from "react-hot-toast";
 export default function RecipeDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { requireAuth } = useAuthGuard();
   const [recipe, setRecipe] = useState<Recipe | null>(null);
   const [comment, setComment] = useState("");
   const [isLiked, setIsLiked] = useState(false);
@@ -47,9 +49,9 @@ export default function RecipeDetail() {
 
   // Xử lý Thả tim
   const handleLike = async () => {
-    if (!currentUserId) return toast.error("Vui lòng đăng nhập để thực hiện!");
-    
-    const res = await interactionService.likeRecipe(parseInt(currentUserId), recipe!.recipeId);
+    if (!requireAuth()) return;
+
+    const res = await interactionService.likeRecipe(parseInt(currentUserId!), recipe!.recipeId);
     if (res.success) {
       setIsLiked(!isLiked);
       toast.success(isLiked ? "Đã bỏ yêu thích" : "Đã thêm vào yêu thích");
@@ -59,19 +61,23 @@ export default function RecipeDetail() {
   // Xử lý gửi bình luận
   const handleSendComment = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!currentUserId) return toast.error("Vui lòng đăng nhập để bình luận!");
+
+    if (!requireAuth()) return;
+
     if (!comment.trim()) return;
 
-    const res = await interactionService.createComment(parseInt(currentUserId), recipe!.recipeId, comment);
+    const res = await interactionService.createComment(parseInt(currentUserId!), recipe!.recipeId, comment);
     if (res.success) {
       toast.success("Đã gửi bình luận!");
       setComment("");
-      loadRecipe(); 
+      loadRecipe();
     }
   };
 
   // Xử lý xóa bình luận
   const handleDeleteComment = async (commentId: number) => {
+    if (!requireAuth()) return;
+
     try {
       const res = await interactionService.deleteComment(commentId);
       if (res.success) {

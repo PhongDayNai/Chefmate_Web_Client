@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router";
 import { authService } from "../api/authService";
+import { getAndClearRedirectUrl } from "~/utils/authUtils";
 import toast from "react-hot-toast";
 
 interface Props {
@@ -25,10 +26,11 @@ export default function LoginForm({ onSwitch, onForgot }: Props) {
         localStorage.setItem("userName", res.data.fullName);
         
         toast.success(`Chào mừng ${res.data.fullName} trở lại!`);
-        
-        // Chuyển hướng sau 1 giây
+
+        // Redirect to saved URL or home
         setTimeout(() => {
-          navigate("/");
+          const redirectUrl = getAndClearRedirectUrl();
+          navigate(redirectUrl || "/");
         }, 1000);
       }
     } catch (error: any) {

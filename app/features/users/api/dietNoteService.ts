@@ -1,4 +1,6 @@
 import axios from "axios";
+import { checkAuth } from "~/utils/authUtils";
+
 const BASE_URL = "https://your-api-url.com/api/user-diet-notes";
 
 export const dietNoteService = {
@@ -9,11 +11,21 @@ export const dietNoteService = {
   },
   // Thêm hoặc cập nhật ghi chú
   upsertNote: async (data: any) => {
+    // Auth guard for mutation
+    if (!checkAuth()) {
+      throw new Error("AUTH_REQUIRED");
+    }
+
     const res = await axios.post(`${BASE_URL}/upsert`, data);
     return res.data;
   },
   // Xóa ghi chú
   deleteNote: async (userId: number, noteId: number) => {
+    // Auth guard for mutation
+    if (!checkAuth()) {
+      throw new Error("AUTH_REQUIRED");
+    }
+
     const res = await axios.delete(`${BASE_URL}/delete`, { data: { userId, noteId } });
     return res.data;
   }
