@@ -1,22 +1,21 @@
-// app/components/layout/MainLayout.tsx
-import { Outlet } from "react-router";
+import Footer from "./Footer";
 import Navbar from "./Navbar";
-import Footer from "./Footer"; // Import Footer mới
-import AiChatBubble from "../AiChatBubble";
+import AiChatBubble from "~/components/AiChatBubble";
+import PendingRecipeDialog from "~/features/chat/components/PendingRecipeDialog";
+import { ChatFlowProvider } from "~/features/chat/state/ChatFlowProvider";
 
-export default function MainLayout() {
+export default function MainLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div className="min-h-screen flex flex-col bg-gray-50">
-      <Navbar />
+    <ChatFlowProvider>
+      <div className="min-h-screen flex flex-col bg-gray-50">
+        <Navbar />
 
-      {/* flex-grow giúp Main chiếm hết chỗ trống để đẩy Footer xuống đáy trang */}
-      <div className="flex-grow">
-        <Outlet />
+        <div className="flex-grow">{children}</div>
+
+        <Footer />
+        <AiChatBubble />
+        <PendingRecipeDialog />
       </div>
-
-      <Footer />
-
-      <AiChatBubble />
-    </div>
+    </ChatFlowProvider>
   );
 }
