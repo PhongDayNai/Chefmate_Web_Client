@@ -13,19 +13,19 @@ export default function Navbar() {
   const navigate = useNavigate();
   const [keyword, setKeyword] = useState("");
   
-  // Lấy dữ liệu an toàn từ localStorage
   const userName = typeof window !== "undefined" ? localStorage.getItem("userName") : "";
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
     if (keyword.trim()) {
       navigate(`/search?q=${encodeURIComponent(keyword.trim())}`);
-      setKeyword(""); // Xóa trắng sau khi search
+      setKeyword("");
     }
   };
 
   const handleLogout = () => {
-    localStorage.clear();
+    // Xóa toàn bộ dữ liệu phiên làm việc bao gồm cả Session Chat AI
+    localStorage.clear(); 
     window.location.href = "/auth";
   };
 
@@ -38,7 +38,7 @@ export default function Navbar() {
           BEPTROLY
         </Link>
 
-        {/* THANH SEARCH Ở GIỮA */}
+        {/* Search */}
         <form onSubmit={handleSearch} className="flex-1 max-w-md relative group hidden sm:block">
           <input 
             type="text"
@@ -50,10 +50,7 @@ export default function Navbar() {
           <SearchIcon className="absolute left-4 top-2.5 w-4 h-4 text-gray-400 group-focus-within:text-[#f59127]" />
         </form>
 
-        {/* Menu điều hướng & Actions */}
         <div className="flex items-center gap-3 md:gap-5 flex-shrink-0">
-          
-          {/* Nút Điều hướng chính */}
           <div className="flex items-center gap-4 mr-2">
             <Link to="/" className="flex items-center gap-1 text-gray-600 hover:text-[#f59127] transition-colors">
               <Home className="w-5 h-5" />
@@ -66,7 +63,6 @@ export default function Navbar() {
             </Link>
           </div>
 
-          {/* NÚT ĐĂNG MÓN - NỔI BẬT */}
           <Link 
             to="/create-recipe" 
             className="flex items-center gap-2 px-4 py-2 bg-[#f59127] text-white rounded-xl font-bold hover:bg-[#e07d16] transition-all shadow-md shadow-orange-100 active:scale-95"
@@ -77,7 +73,6 @@ export default function Navbar() {
 
           <div className="h-6 w-[1px] bg-gray-200 hidden sm:block"></div>
 
-          {/* Thông tin User & Logout */}
           <div className="flex items-center gap-3">
             <div className="hidden xl:flex flex-col items-end">
               <span className="text-[10px] text-gray-400 font-black uppercase tracking-widest leading-none mb-1">Đầu bếp</span>
@@ -88,7 +83,6 @@ export default function Navbar() {
             
             <Link 
               to="/profile" 
-              title="Trang cá nhân"
               className="w-10 h-10 bg-[#f59127cc] text-white rounded-full flex items-center justify-center font-bold border-2 border-white shadow-sm hover:scale-105 transition-transform"
             >
               {userName ? userName.charAt(0).toUpperCase() : "U"}

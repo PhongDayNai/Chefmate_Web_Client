@@ -11,11 +11,19 @@ export default function AiChatBubble() {
   const [messages, setMessages] = useState<any[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
-  const [currentSessionId, setCurrentSessionId] = useState<number | null>(null);
-  const scrollRef = useRef<HTMLDivElement>(null);
+  
+  const [currentSessionId, setCurrentSessionId] = useState<number | null>(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("lastChatSessionId");
+      return saved ? parseInt(saved) : null;
+    }
+    return null;
+  });
 
+  const scrollRef = useRef<HTMLDivElement>(null);
   const userId = typeof window !== "undefined" ? localStorage.getItem("userId") : null;
 
+  
   // 1. Tự động cuộn xuống cuối
   useEffect(() => {
     if (isOpen) {
@@ -25,27 +33,49 @@ export default function AiChatBubble() {
     }
   }, [messages, isOpen]);
 
-  // 2. Load lịch sử chat (Sửa lỗi map: lấy res.data.messages)
+
+  // 2. Hàm Load lịch sử thông minh (Hỗ trợ khôi phục sau khi Login)
   const loadHistory = async () => {
-    if (!userId || !currentSessionId) return;
+    if (!userId) return;
+    
     try {
-      const res = await chatService.getSessionHistory(currentSessionId, parseInt(userId));
-      if (res.success) {
-        // QUAN TRỌNG: Lấy đúng mảng messages từ data
-        setMessages(res.data?.messages || []);
+      // TRƯỜNG HỢP 1: Có Session ID trong máy -> Load theo Session
+      if (currentSessionId) {
+        const res = await chatService.getSessionHistory(currentSessionId, parseInt(userId));
+        if (res.success && res.data?.messages) {
+          setMessages(res.data.messages);
+          return;
+        }
+      }
+
+      // TRƯỜNG HỢP 2: Không có ID (vừa login lại) -> Lấy Timeline hợp nhất
+      const resTimeline = await chatService.getUnifiedTimeline(parseInt(userId));
+      if (resTimeline.success && resTimeline.data?.length > 0) {
+        setMessages(resTimeline.data);
+        
+        // Lấy Session ID của tin nhắn cuối cùng để tiếp tục cuộc hội thoại
+        const lastMsg = resTimeline.data[resTimeline.data.length - 1];
+        if (lastMsg.chatSessionId) {
+          const sid = lastMsg.chatSessionId;
+          setCurrentSessionId(sid);
+          localStorage.setItem("lastChatSessionId", sid.toString());
+        }
       }
     } catch (error) {
-      console.error("Lỗi load lịch sử:", error);
+      console.error("Lỗi đồng bộ lịch sử:", error);
     }
   };
 
+
+  // 3. Tự động load khi người dùng MỞ chat
   useEffect(() => {
-    if (isOpen && currentSessionId) {
+    if (isOpen && userId) {
       loadHistory();
     }
-  }, [isOpen, currentSessionId]);
+  }, [isOpen]);
 
-  // 3. Logic mở/đóng cửa sổ Chat
+
+  // 4. Mở/Đóng Chat
   const toggleChat = () => {
     if (!userId) {
       toast.error("Vui lòng đăng nhập để chat với Bepes!");
@@ -64,7 +94,7 @@ export default function AiChatBubble() {
     }
   };
 
-  // 4. Logic gửi tin nhắn (Sửa lỗi hiển thị assistantMessage)
+  // 5. Gửi tin nhắn
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim() || !userId || loading) return;
@@ -73,7 +103,6 @@ export default function AiChatBubble() {
     setInput("");
     setLoading(true);
 
-    // Hiển thị tin nhắn User (dùng trường content cho đồng bộ)
     setMessages((prev) => [...prev, { role: "user", content: userMsg }]);
 
     try {
@@ -85,7 +114,9 @@ export default function AiChatBubble() {
 
       if (res.success) {
         if (!currentSessionId && res.data?.session?.chatSessionId) {
-          setCurrentSessionId(res.data.session.chatSessionId);
+          const newSessionId = res.data.session.chatSessionId;
+          setCurrentSessionId(newSessionId);
+          localStorage.setItem("lastChatSessionId", newSessionId.toString());
         }
 
         const aiReply = res.data?.assistantMessage;
@@ -122,11 +153,10 @@ export default function AiChatBubble() {
           <div className="flex-1 overflow-y-auto p-5 space-y-4 bg-white custom-scrollbar">
             {messages.map((msg, idx) => (
               <div key={idx} className={`flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
-                <div className={`w-8 h-8 rounded-xl flex-shrink-0 flex items-center justify-center border ${msg.role === 'user' ? 'bg-gray-800 text-white border-gray-700' : 'bg-orange-50 text-[#f59127] border-orange-100'}`}>
+                <div className={`w-8 h-8 rounded-xl flex-shrink-0 flex items-center justify-center border shadow-sm ${msg.role === 'user' ? 'bg-gray-800 text-white border-gray-700' : 'bg-orange-50 text-[#f59127] border-orange-100'}`}>
                   {msg.role === 'user' ? <UserIcon size={14} /> : <Bot size={14} />}
                 </div>
                 <div className={`max-w-[80%] p-4 rounded-2xl font-medium leading-relaxed text-sm shadow-sm whitespace-pre-wrap ${msg.role === 'user' ? 'bg-gray-900 text-white rounded-tr-none' : 'bg-gray-100 text-gray-800 rounded-tl-none'}`}>
-                  {/* Dùng msg.content để khớp với API */}
                   {msg.content}
                 </div>
               </div>
