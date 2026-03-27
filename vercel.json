@@ -1,10 +1,4 @@
 {
   "version": 2,
-  "framework": "react-router",
-  "rewrites": [
-    {
-      "source": "/(.*)",
-      "destination": "/"
-    }
-  ]
-}   
+  "framework": "nextjs"
+}

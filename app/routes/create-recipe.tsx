@@ -1,6 +1,8 @@
 // app/routes/create-recipe.tsx
+"use client";
+
 import { useState } from "react";
-import { useNavigate } from "react-router";
+import { useRouter } from "next/navigation";
 import { recipeService } from "~/features/recipes/api/recipeService";
 import { useAuthGuard } from "~/hooks/useAuthGuard";
 import {
@@ -18,7 +20,7 @@ import {
 import toast from "react-hot-toast";
 
 export default function CreateRecipe() {
-  const navigate = useNavigate();
+  const router = useRouter();
   const { requireAuth } = useAuthGuard();
   const [loading, setLoading] = useState(false);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
@@ -80,6 +82,11 @@ export default function CreateRecipe() {
     if (!formData.image) return toast.error("Vui lòng chọn ảnh món ăn!");
 
     const userId = localStorage.getItem("userId");
+    if (!userId) {
+      toast.error("Không tìm thấy thông tin người dùng. Vui lòng đăng nhập lại.");
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     const body = new FormData();
     body.append("recipeName", formData.recipeName);
@@ -100,7 +107,7 @@ export default function CreateRecipe() {
       const res = await recipeService.createRecipe(body);
       if (res.success) {
         toast.success("Đăng công thức thành công!");
-        navigate(`/recipe/${res.data}`); 
+        router.push(`/recipe/${res.data}`);
       }
     } catch (error) {
       toast.error("Có lỗi xảy ra khi tạo công thức");
@@ -112,7 +119,7 @@ export default function CreateRecipe() {
   return (
     <div className="min-h-screen bg-gray-50 pb-20">
       <div className="max-w-4xl mx-auto px-6 pt-10">
-        <button onClick={() => navigate(-1)} className="flex items-center gap-2 text-gray-500 font-bold mb-6 hover:text-black transition-colors">
+        <button onClick={() => router.back()} className="flex items-center gap-2 text-gray-500 font-bold mb-6 hover:text-black transition-colors">
           <ChevronLeft size={20} /> Quay lại
         </button>
 

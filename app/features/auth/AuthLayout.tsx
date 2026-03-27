@@ -15,7 +15,7 @@ export default function AuthLayout({ children, title }: AuthLayoutProps) {
         
         {/* CHÈN ẢNH NỀN: Tối ưu độ nét */}
         <img 
-          src={authBgImage} 
+          src={authBgImage.src} 
           alt="BEPTROLY Background" 
           className="absolute inset-0 w-full h-full object-cover z-0 brightness-110"
           style={{ 

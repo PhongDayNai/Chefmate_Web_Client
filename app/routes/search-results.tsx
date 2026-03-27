@@ -1,12 +1,14 @@
 // app/routes/search-results.tsx
+"use client";
+
 import { useEffect, useState } from "react";
-import { useSearchParams } from "react-router";
+import { useSearchParams } from "next/navigation";
 import { recipeService } from "~/features/recipes/api/recipeService";
 import RecipeCard from "~/features/recipes/components/RecipeCard";
 import { Search } from "lucide-react";
 
 export default function SearchResultsPage() {
-  const [searchParams] = useSearchParams();
+  const searchParams = useSearchParams();
   const query = searchParams.get("q") || ""; // Lấy chữ "Feijoada" từ URL
   const [recipes, setRecipes] = useState([]);
   const [loading, setLoading] = useState(true);

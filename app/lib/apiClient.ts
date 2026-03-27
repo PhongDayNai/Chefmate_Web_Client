@@ -1,10 +1,11 @@
 // app/lib/apiClient.ts
 import axios from "axios";
 import toast from "react-hot-toast";
+import { API_BASE_URL } from "~/lib/apiConfig";
 
 // Khởi tạo instance axios với cấu hình mặc định
 const apiClient = axios.create({
-  baseURL: "https://your-api-url.com", // Base URL của Backend ChefMate
+  baseURL: API_BASE_URL,
   headers: {
     "Content-Type": "application/json",
   },

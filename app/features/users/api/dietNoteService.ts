@@ -1,17 +1,16 @@
 import axios from "axios";
 import { checkAuth } from "~/utils/authUtils";
+import { buildApiUrl } from "~/lib/apiConfig";
 
-const BASE_URL = "https://your-api-url.com/api/user-diet-notes";
+const BASE_URL = buildApiUrl("/api/user-diet-notes");
 
 export const dietNoteService = {
-  // Lấy danh sách ghi chú
   getNotes: async (userId: number) => {
     const res = await axios.get(`${BASE_URL}?userId=${userId}`);
     return res.data;
   },
-  // Thêm hoặc cập nhật ghi chú
+
   upsertNote: async (data: any) => {
-    // Auth guard for mutation
     if (!checkAuth()) {
       throw new Error("AUTH_REQUIRED");
     }
@@ -19,14 +18,13 @@ export const dietNoteService = {
     const res = await axios.post(`${BASE_URL}/upsert`, data);
     return res.data;
   },
-  // Xóa ghi chú
+
   deleteNote: async (userId: number, noteId: number) => {
-    // Auth guard for mutation
     if (!checkAuth()) {
       throw new Error("AUTH_REQUIRED");
     }
 
     const res = await axios.delete(`${BASE_URL}/delete`, { data: { userId, noteId } });
     return res.data;
-  }
+  },
 };

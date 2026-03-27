@@ -1,9 +1,13 @@
 // app/routes/recipe-detail.tsx
+"use client";
+
 import { useEffect, useState } from "react";
-import { useParams, useNavigate, Link } from "react-router";
+import Link from "next/link";
+import { useParams, useRouter } from "next/navigation";
 import { recipeService } from "~/features/recipes/api/recipeService";
 import { interactionService } from "~/features/interactions/api/interactionService";
 import { useAuthGuard } from "~/hooks/useAuthGuard";
+import { API_BASE_URL } from "~/lib/apiConfig";
 import {
   Clock,
   Users,
@@ -18,8 +22,9 @@ import type { Recipe } from "~/features/recipes/types";
 import toast from "react-hot-toast";
 
 export default function RecipeDetail() {
-  const { id } = useParams();
-  const navigate = useNavigate();
+  const params = useParams<{ id: string | string[] }>();
+  const id = Array.isArray(params.id) ? params.id[0] : params.id;
+  const router = useRouter();
   const { requireAuth } = useAuthGuard();
   const [recipe, setRecipe] = useState<Recipe | null>(null);
   const [comment, setComment] = useState("");
@@ -92,7 +97,7 @@ export default function RecipeDetail() {
   if (loading) return <div className="p-20 text-center font-bold text-gray-400">Đang chuẩn bị công thức...</div>;
   if (!recipe) return <div className="p-20 text-center text-red-500">Không tìm thấy công thức này!</div>;
 
-  const imageUrl = recipe.image.startsWith('http') ? recipe.image : `https://your-api-url.com${recipe.image}`;
+  const imageUrl = recipe.image.startsWith("http") ? recipe.image : `${API_BASE_URL}${recipe.image}`;
 
   return (
     <div className="min-h-screen bg-white pb-20">
@@ -100,7 +105,7 @@ export default function RecipeDetail() {
         <img src={imageUrl} alt={recipe.recipeName} className="w-full h-full object-cover" />
         <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent"></div>
         <button 
-          onClick={() => navigate(-1)}
+          onClick={() => router.back()}
           className="absolute top-6 left-6 p-2 bg-white/20 backdrop-blur-md rounded-full text-white hover:bg-white/40 transition-all"
         >
           <ChevronLeft className="w-6 h-6" />
@@ -123,7 +128,7 @@ export default function RecipeDetail() {
             {recipe.tags?.map(tag => (
                 <Link 
                   key={tag.tagId} 
-                  to={`/tag/${tag.tagName}`} 
+                  href={`/tag/${tag.tagName}`}
                   className="px-4 py-1.5 bg-orange-50 text-[#f59127] text-[10px] font-black uppercase rounded-full tracking-widest hover:bg-[#f59127] hover:text-white transition-all shadow-sm"
                 >
                   {tag.tagName}

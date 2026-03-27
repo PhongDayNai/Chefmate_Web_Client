@@ -1,15 +1,17 @@
+"use client";
+
 import { useEffect, useState } from "react";
 import { pantryService } from "~/features/pantry/api/pantryService";
 import PantryItem from "~/features/pantry/components/PantryItem";
 import AddIngredientModal from "~/features/pantry/components/AddIngredientModal";
 import { useAuthGuard } from "~/hooks/useAuthGuard";
 import { Plus, Refrigerator, ChevronLeft } from "lucide-react";
-import { useNavigate } from "react-router";
+import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
 import type { PantryItemType } from "~/features/pantry/types";
 
 export default function PantryPage() {
-  const navigate = useNavigate();
+  const router = useRouter();
   const { requireAuth } = useAuthGuard();
   const [items, setItems] = useState<PantryItemType[]>([]);
   const [loading, setLoading] = useState(true);
@@ -73,7 +75,7 @@ export default function PantryPage() {
       <div className="min-h-screen bg-gray-50 pb-32">
         <header className="bg-white/80 backdrop-blur-md border-b border-gray-100 sticky top-0 z-50 p-4">
           <div className="max-w-4xl mx-auto flex justify-between items-center">
-            <button onClick={() => navigate("/")} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
+            <button onClick={() => router.push("/")} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
               <ChevronLeft className="w-6 h-6 text-gray-600" />
             </button>
             <div className="flex items-center gap-2">

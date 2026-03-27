@@ -1,5 +1,7 @@
+"use client";
+
 import { useState } from "react";
-import { useNavigate } from "react-router";
+import { useRouter } from "next/navigation";
 import { authService } from "../api/authService";
 import { getAndClearRedirectUrl } from "~/utils/authUtils";
 import toast from "react-hot-toast";
@@ -10,7 +12,7 @@ interface Props {
 }
 
 export default function LoginForm({ onSwitch, onForgot }: Props) {
-  const navigate = useNavigate();
+  const router = useRouter();
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -21,16 +23,14 @@ export default function LoginForm({ onSwitch, onForgot }: Props) {
     try {
       const res = await authService.login(identifier, password);
       if (res.success) {
-        // Lưu thông tin vào LocalStorage
         localStorage.setItem("userId", res.data.userId.toString());
         localStorage.setItem("userName", res.data.fullName);
-        
+
         toast.success(`Chào mừng ${res.data.fullName} trở lại!`);
 
-        // Redirect to saved URL or home
         setTimeout(() => {
           const redirectUrl = getAndClearRedirectUrl();
-          navigate(redirectUrl || "/");
+          router.push(redirectUrl || "/");
         }, 1000);
       }
     } catch (error: any) {

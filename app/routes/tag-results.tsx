@@ -1,13 +1,16 @@
 // app/routes/tag-results.tsx
+"use client";
+
 import { useEffect, useState } from "react";
-import { useParams, useNavigate } from "react-router";
+import { useParams, useRouter } from "next/navigation";
 import { recipeService } from "~/features/recipes/api/recipeService";
 import RecipeCard from "~/features/recipes/components/RecipeCard";
 import { ChevronLeft, Hash } from "lucide-react";
 
 export default function TagResultsPage() {
-  const { tagName } = useParams();
-  const navigate = useNavigate();
+  const params = useParams<{ tagName: string | string[] }>();
+  const tagName = Array.isArray(params.tagName) ? params.tagName[0] : params.tagName;
+  const router = useRouter();
   const [recipes, setRecipes] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -28,7 +31,7 @@ export default function TagResultsPage() {
     <div className="min-h-screen bg-gray-50 pb-20">
       <header className="bg-white border-b border-gray-100 p-6">
         <div className="max-w-7xl mx-auto flex items-center gap-4">
-          <button onClick={() => navigate(-1)} className="p-2 hover:bg-gray-100 rounded-full transition-all">
+          <button onClick={() => router.back()} className="p-2 hover:bg-gray-100 rounded-full transition-all">
             <ChevronLeft size={24} className="text-gray-600" />
           </button>
           <div>
