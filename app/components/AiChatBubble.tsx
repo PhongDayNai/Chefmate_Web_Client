@@ -22,6 +22,7 @@ export default function AiChatBubble() {
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const userId = typeof window !== "undefined" ? localStorage.getItem("userId") : null;
+  const userName = typeof window !== "undefined" ? localStorage.getItem("userName") : null;
 
   // 1. Tự động cuộn xuống cuối
   useEffect(() => {
@@ -71,6 +72,13 @@ export default function AiChatBubble() {
     }
   }, [isOpen]);
 
+  // 3.1. Tự động load khi người dùng vừa đăng nhập (userId thay đổi)
+  useEffect(() => {
+    if (userId && isOpen) {
+      loadHistory();
+    }
+  }, [userId]);
+
   // 4. Mở/Đóng Chat
   const toggleChat = () => {
     if (!userId) {
@@ -81,10 +89,11 @@ export default function AiChatBubble() {
     setIsOpen(!isOpen);
     
     if (messages.length === 0 && !currentSessionId) {
+      const displayName = userName ? userName.split(' ').pop() : "bạn";
       setMessages([
         { 
           role: "assistant", 
-          content: "Chào Sơn! Tôi là Bepes. Bạn cần tôi trợ giúp công thức nấu ăn nào không?" 
+          content: `Chào ${displayName}! Tôi là Bepes. Bạn cần tôi trợ giúp công thức nấu ăn nào không?` 
         }
       ]);
     }
@@ -121,7 +130,8 @@ export default function AiChatBubble() {
         }
       }
     } catch (error: any) {
-      toast.error("Bepes đang bận, Sơn thử lại sau nhé!");
+      const displayName = userName ? userName.split(' ').pop() : "bạn";
+      toast.error(`Bepes đang bận, ${displayName} thử lại sau nhé!`);
     } finally {
       setLoading(false);
     }
