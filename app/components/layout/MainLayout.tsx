@@ -2,6 +2,7 @@
 import { Outlet } from "react-router";
 import Navbar from "./Navbar";
 import Footer from "./Footer"; // Import Footer mới
+import AiChatBubble from "../AiChatBubble";
 
 export default function MainLayout() {
   return (
@@ -14,6 +15,8 @@ export default function MainLayout() {
       </div>
 
       <Footer />
+
+      <AiChatBubble />
     </div>
   );
 }

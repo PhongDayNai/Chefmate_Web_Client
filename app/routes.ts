@@ -11,6 +11,7 @@ export default [
     route("tag/:tagName", "routes/tag-results.tsx"),
     route("search", "routes/search-results.tsx"),
     route("create-recipe", "routes/create-recipe.tsx"),
+    route("chat", "routes/chat.tsx"),
   ]),
 
   route("auth", "routes/auth.tsx"),
