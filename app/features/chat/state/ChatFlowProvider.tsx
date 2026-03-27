@@ -781,20 +781,19 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
       await fetchUnifiedTimeline({ createSessionIfEmpty: true, forceClearActiveRecipe: true });
       await loadSessions();
 
-      // In some backend states, timeline refresh can still return the same
-      // session snapshot with stale activeRecipeId. Force clear on current session.
+      // Backend may carry active recipe into the next session after resolve.
+      // Always clear active recipe on the latest session id server-side,
+      // do not rely on local state because forceClearActiveRecipe already nulls it.
       const latestSession = stateRef.current.currentSession;
       if (latestSession?.chatSessionId) {
-        if (latestSession.activeRecipeId !== null && latestSession.activeRecipeId !== undefined) {
-          try {
-            await chatService.updateActiveRecipe({
-              userId,
-              chatSessionId: latestSession.chatSessionId,
-              recipeId: null,
-            });
-          } catch (error) {
-            // Silent fallback: keep UI consistent even if backend patch fails.
-          }
+        try {
+          await chatService.updateActiveRecipe({
+            userId,
+            chatSessionId: latestSession.chatSessionId,
+            recipeId: null,
+          });
+        } catch (error) {
+          // Silent fallback: keep UI consistent even if backend patch fails.
         }
 
         mergeState({

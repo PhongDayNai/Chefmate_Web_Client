@@ -104,6 +104,7 @@ export default function ChatPage() {
   const nearBottomRef = useRef(true);
   const prevFirstKeyRef = useRef<string | null>(null);
   const prevLastKeyRef = useRef<string | null>(null);
+  const bootstrapKeyRef = useRef<string | null>(null);
 
   const userId = getUserId();
   const isLoggedIn = Boolean(userId);
@@ -155,8 +156,29 @@ export default function ChatPage() {
 
   useEffect(() => {
     if (!isLoggedIn) return;
-    bootstrapUnifiedTimeline(recipeIdParam > 0 ? recipeIdParam : undefined);
-  }, [bootstrapUnifiedTimeline, isLoggedIn, recipeIdParam]);
+    const activeRecipeId = recipeIdParam > 0 ? recipeIdParam : undefined;
+    const bootstrapKey = activeRecipeId ? `recipe:${activeRecipeId}` : "plain";
+    if (bootstrapKeyRef.current === bootstrapKey) return;
+
+    let cancelled = false;
+
+    const runBootstrap = async () => {
+      bootstrapKeyRef.current = bootstrapKey;
+      await bootstrapUnifiedTimeline(activeRecipeId);
+
+      // Consume recipeId query so hard refresh will not re-attach stale recipe context.
+      if (!cancelled && activeRecipeId) {
+        bootstrapKeyRef.current = "plain";
+        router.replace("/chat");
+      }
+    };
+
+    runBootstrap();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [bootstrapUnifiedTimeline, isLoggedIn, recipeIdParam, router]);
 
   useEffect(() => {
     const container = timelineRef.current;
