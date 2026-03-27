@@ -52,7 +52,16 @@ export default function Footer() {
         {/* Dòng bản quyền dưới cùng */}
         <div className="pt-8 border-t border-gray-50 flex flex-col md:flex-row justify-between items-center gap-4">
           <p className="text-xs text-gray-400">
-            © 2026 BEPTROLY. All rights reserved. Made with ❤️ by Bui Cong Son.
+            © 2026 BEPTROLY. All rights reserved. Made with ❤️ by Bui Cong Son &{" "}
+            <a
+              href="https://portfolio.phongdaynai.id.vn"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:underline"
+            >
+              PhongDayNai
+            </a>
+            .
           </p>
           <div className="flex gap-6 text-xs text-gray-400 font-medium">
             <span className="hover:underline cursor-pointer">Điều khoản</span>
