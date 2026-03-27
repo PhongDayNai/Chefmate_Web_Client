@@ -23,7 +23,6 @@ export default function AiChatBubble() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const userId = typeof window !== "undefined" ? localStorage.getItem("userId") : null;
 
-  
   // 1. Tự động cuộn xuống cuối
   useEffect(() => {
     if (isOpen) {
@@ -32,7 +31,6 @@ export default function AiChatBubble() {
       }, 100);
     }
   }, [messages, isOpen]);
-
 
   // 2. Hàm Load lịch sử thông minh (Hỗ trợ khôi phục sau khi Login)
   const loadHistory = async () => {
@@ -66,14 +64,12 @@ export default function AiChatBubble() {
     }
   };
 
-
   // 3. Tự động load khi người dùng MỞ chat
   useEffect(() => {
     if (isOpen && userId) {
       loadHistory();
     }
   }, [isOpen]);
-
 
   // 4. Mở/Đóng Chat
   const toggleChat = () => {
