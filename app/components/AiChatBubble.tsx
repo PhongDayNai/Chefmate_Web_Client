@@ -178,7 +178,7 @@ export default function AiChatBubble() {
       {isBubbleRendered && (
         <div
           onWheel={handleBubbleWheel}
-          className={`h-[560px] w-[380px] overflow-hidden rounded-[2.5rem] border border-gray-100 bg-white shadow-2xl md:w-[420px] flex flex-col transition-all ease-out duration-300 ${
+          className={`h-[750px] max-h-[calc(100dvh-2rem)] w-[380px] overflow-hidden rounded-[2.5rem] border border-gray-100 bg-white shadow-2xl md:w-[420px] flex flex-col transition-all ease-out duration-300 ${
             isOpen ? "translate-y-0 scale-100 opacity-100" : "pointer-events-none translate-y-6 scale-95 opacity-0"
           }`}
         >
@@ -304,7 +304,11 @@ export default function AiChatBubble() {
                 return (
                   <Fragment key={renderKey}>
                     {showSessionDivider ? (
-                      <div className="py-1 text-center text-[11px] font-semibold text-gray-400">{`--- ${sessionTimeLabel} ---`}</div>
+                      <div className="flex items-center gap-2 py-1">
+                        <div className="h-px flex-1 bg-gray-200" />
+                        <span className="text-[11px] font-semibold text-gray-400">{sessionTimeLabel}</span>
+                        <div className="h-px flex-1 bg-gray-200" />
+                      </div>
                     ) : null}
                     <div className={`flex gap-3 ${msg.role === "user" ? "flex-row-reverse" : ""}`}>
                       <div

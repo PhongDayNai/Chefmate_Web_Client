@@ -128,7 +128,7 @@ export default function ChatPage() {
                 <p className="truncate text-[18px] font-semibold leading-relaxed">
                   Món đang chọn:{" "}
                   <span className="font-black">
-                    {activeRecommendation?.recipeName || "Chưa chọn món cho cuộc trò chuyện hiện tại"}
+                    {activeRecommendation?.recipeName || "Chưa chọn món"}
                   </span>
                 </p>
                 <p className="mt-1 truncate text-base font-semibold leading-relaxed">
@@ -217,12 +217,16 @@ export default function ChatPage() {
               const showSessionDivider = shouldShowSessionDivider(state.timeline, index);
               const sessionTimeLabel = formatSessionTimeLabel(msg.createdAt);
 
-              return (
-                <Fragment key={renderKey}>
-                  {showSessionDivider ? (
-                    <div className="py-1 text-center text-xs font-semibold text-[#9ca3af]">{`--- ${sessionTimeLabel} ---`}</div>
-                  ) : null}
-                  <div className={`flex gap-3 ${msg.role === "user" ? "flex-row-reverse" : ""}`}>
+                return (
+                  <Fragment key={renderKey}>
+                    {showSessionDivider ? (
+                      <div className="flex items-center gap-3 py-1">
+                        <div className="h-px flex-1 bg-[#d7dde5]" />
+                        <span className="text-[11px] font-semibold text-[#9ca3af]">{sessionTimeLabel}</span>
+                        <div className="h-px flex-1 bg-[#d7dde5]" />
+                      </div>
+                    ) : null}
+                    <div className={`flex gap-3 ${msg.role === "user" ? "flex-row-reverse" : ""}`}>
                     <div
                       className={`mt-1 flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full ${
                         msg.role === "user"
