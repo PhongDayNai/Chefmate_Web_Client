@@ -29,13 +29,21 @@ export const recipeService = {
     return null;
   },
 
-  searchByTag: async (tagName: string, userId: number) => {
-    const res = await axios.post(`${BASE_URL}/search-by-tag`, { tagName, userId });
+  searchByTag: async (tagName: string, userId?: number) => {
+    const payload: { tagName: string; userId?: number } = { tagName };
+    if (typeof userId === "number" && Number.isFinite(userId) && userId > 0) {
+      payload.userId = userId;
+    }
+    const res = await axios.post(`${BASE_URL}/search-by-tag`, payload);
     return res.data;
   },
 
-  searchRecipes: async (recipeName: string, userId: number) => {
-    const res = await axios.post(`${BASE_URL}/search`, { recipeName, userId });
+  searchRecipes: async (recipeName: string, userId?: number) => {
+    const payload: { recipeName: string; userId?: number } = { recipeName };
+    if (typeof userId === "number" && Number.isFinite(userId) && userId > 0) {
+      payload.userId = userId;
+    }
+    const res = await axios.post(`${BASE_URL}/search`, payload);
     return res.data;
   },
 

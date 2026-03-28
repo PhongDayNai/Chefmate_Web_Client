@@ -16,10 +16,12 @@ export default function TagResultsPage() {
 
   useEffect(() => {
     const fetchRecipes = async () => {
-      const userId = localStorage.getItem("userId") || "0";
+      const rawUserId = localStorage.getItem("userId");
+      const parsedUserId = rawUserId ? Number(rawUserId) : NaN;
+      const userId = Number.isFinite(parsedUserId) && parsedUserId > 0 ? parsedUserId : undefined;
       if (tagName) {
         setLoading(true);
-        const res = await recipeService.searchByTag(tagName, parseInt(userId));
+        const res = await recipeService.searchByTag(tagName, userId);
         if (res.success) setRecipes(res.data);
         setLoading(false);
       }

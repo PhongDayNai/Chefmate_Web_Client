@@ -16,9 +16,16 @@ export default function SearchResultsPage() {
   useEffect(() => {
     const fetchResults = async () => {
       setLoading(true);
-      const userId = localStorage.getItem("userId") || "0";
+      const rawUserId = localStorage.getItem("userId");
+      const parsedUserId = rawUserId ? Number(rawUserId) : NaN;
+      const userId = Number.isFinite(parsedUserId) && parsedUserId > 0 ? parsedUserId : undefined;
       try {
-        const res = await recipeService.searchRecipes(query, parseInt(userId));
+        const normalizedQuery = query.trim();
+        if (!normalizedQuery) {
+          setRecipes([]);
+          return;
+        }
+        const res = await recipeService.searchRecipes(normalizedQuery, userId);
         if (res.success) setRecipes(res.data);
       } catch (error) {
         console.error("Search error:", error);
