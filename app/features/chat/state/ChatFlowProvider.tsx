@@ -27,7 +27,7 @@ import { pantryService } from "~/features/pantry/api/pantryService";
 
 const AI_BUSY_BACKOFF_MS = [3000, 5000, 8000] as const;
 const MAX_NO_PROGRESS_ATTEMPTS = 2;
-const DEFAULT_LIMIT = 30;
+const DEFAULT_LIMIT = 32;
 const LAST_CHAT_SESSION_ID_KEY = "lastChatSessionId";
 const LAST_CHAT_USER_ID_KEY = "lastChatUserId";
 

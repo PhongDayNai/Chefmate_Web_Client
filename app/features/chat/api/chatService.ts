@@ -34,7 +34,7 @@ export const chatService = {
       })
       .then((res: any) => res.data),
 
-  getUnifiedTimeline: ({ userId, limit = 30, beforeMessageId }: UnifiedTimelineParams) =>
+  getUnifiedTimeline: ({ userId, limit = 32, beforeMessageId }: UnifiedTimelineParams) =>
     axios.get(`${BASE_URL}/messages`, { params: { userId, limit, beforeMessageId } }).then((res: any) => res.data),
 
   resolveAndCreate: (data: ResolvePreviousPayload) =>
