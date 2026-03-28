@@ -127,7 +127,7 @@ export default function RecipeDetail() {
             {recipe.tags?.map((tag, index) => (
                 <Link 
                   key={`${tag.tagId}-${tag.tagName}-${index}`}
-                  href={`/tag/${tag.tagName}`}
+                  href={`/tag/${encodeURIComponent(tag.tagName)}`}
                   className="px-4 py-1.5 bg-orange-50 text-[#f59127] text-[10px] font-black uppercase rounded-full tracking-widest hover:bg-[#f59127] hover:text-white transition-all shadow-sm"
                 >
                   {tag.tagName}

@@ -9,7 +9,8 @@ import { ChevronLeft, Hash } from "lucide-react";
 
 export default function TagResultsPage() {
   const params = useParams<{ tagName: string | string[] }>();
-  const tagName = Array.isArray(params.tagName) ? params.tagName[0] : params.tagName;
+  const rawTagName = Array.isArray(params.tagName) ? params.tagName[0] : params.tagName;
+  const tagName = decodeURIComponent(rawTagName || "").trim();
   const router = useRouter();
   const [recipes, setRecipes] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -19,10 +20,17 @@ export default function TagResultsPage() {
       const rawUserId = localStorage.getItem("userId");
       const parsedUserId = rawUserId ? Number(rawUserId) : NaN;
       const userId = Number.isFinite(parsedUserId) && parsedUserId > 0 ? parsedUserId : undefined;
-      if (tagName) {
-        setLoading(true);
+      if (!tagName) {
+        setRecipes([]);
+        setLoading(false);
+        return;
+      }
+
+      setLoading(true);
+      try {
         const res = await recipeService.searchByTag(tagName, userId);
         if (res.success) setRecipes(res.data);
+      } finally {
         setLoading(false);
       }
     };
