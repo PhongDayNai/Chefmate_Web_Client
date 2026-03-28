@@ -12,7 +12,6 @@ import {
   Clock,
   Users,
   ChevronLeft,
-  CheckCircle2,
   Heart,
   MessageCircle,
   Send,
@@ -125,9 +124,9 @@ export default function RecipeDetail() {
           </div>
 
           <div className="flex flex-wrap gap-2 mb-6">
-            {recipe.tags?.map(tag => (
+            {recipe.tags?.map((tag, index) => (
                 <Link 
-                  key={tag.tagId} 
+                  key={`${tag.tagId}-${tag.tagName}-${index}`}
                   href={`/tag/${tag.tagName}`}
                   className="px-4 py-1.5 bg-orange-50 text-[#f59127] text-[10px] font-black uppercase rounded-full tracking-widest hover:bg-[#f59127] hover:text-white transition-all shadow-sm"
                 >
@@ -161,8 +160,8 @@ export default function RecipeDetail() {
             <div className="lg:col-span-1">
               <h3 className="text-2xl font-black mb-8 text-gray-800">Nguyên liệu</h3>
               <ul className="space-y-4">
-                {recipe.ingredients?.map((ing) => (
-                  <li key={ing.ingredientId} className="group flex items-center justify-between p-4 rounded-2xl bg-gray-50 border border-transparent hover:border-orange-200 transition-all">
+                {recipe.ingredients?.map((ing, index) => (
+                  <li key={`${ing.ingredientId}-${ing.ingredientName}-${index}`} className="group flex items-center justify-between p-4 rounded-2xl bg-gray-50 border border-transparent hover:border-orange-200 transition-all">
                     <span className={`font-bold ${ing.isMain ? 'text-[#f59127]' : 'text-gray-700'}`}>
                       {ing.ingredientName}
                     </span>
@@ -175,8 +174,8 @@ export default function RecipeDetail() {
             <div className="lg:col-span-2">
               <h3 className="text-2xl font-black mb-8 text-gray-800">Các bước thực hiện</h3>
               <div className="space-y-10">
-                {recipe.cookingSteps?.map((step) => (
-                  <div key={step.indexStep} className="flex gap-6">
+                {recipe.cookingSteps?.map((step, index) => (
+                  <div key={`${step.indexStep}-${index}`} className="flex gap-6">
                     <div className="flex-none w-10 h-10 rounded-2xl bg-gray-900 text-white flex items-center justify-center font-black text-sm shadow-xl">
                       {step.indexStep}
                     </div>
@@ -187,9 +186,9 @@ export default function RecipeDetail() {
                 ))}
               </div>
               
-              <button className="w-full mt-16 py-5 bg-[#f59127cc] hover:bg-[#f59127] text-white font-black rounded-[2rem] shadow-xl shadow-orange-100 flex items-center justify-center gap-3 transition-all transform active:scale-95">
+              {/* <button className="w-full mt-16 py-5 bg-[#f59127cc] hover:bg-[#f59127] text-white font-black rounded-[2rem] shadow-xl shadow-orange-100 flex items-center justify-center gap-3 transition-all transform active:scale-95">
                 <CheckCircle2 className="w-6 h-6" /> HOÀN THÀNH MÓN ĂN
-              </button>
+              </button> */}
             </div>
           </div>
 
@@ -218,8 +217,8 @@ export default function RecipeDetail() {
 
              <div className="space-y-8">
                 {recipe.comments?.length > 0 ? (
-                  recipe.comments.map((cmt: any) => (
-                    <div key={cmt.commentId} className="flex gap-4 animate-in fade-in slide-in-from-bottom-2 duration-500 group">
+                  recipe.comments.map((cmt: any, index: number) => (
+                    <div key={`${cmt.commentId}-${index}`} className="flex gap-4 animate-in fade-in slide-in-from-bottom-2 duration-500 group">
                        <div className="w-10 h-10 bg-gray-100 rounded-full flex-none flex items-center justify-center text-gray-400 font-bold text-xs uppercase">
                           {cmt.userName?.charAt(0)}
                        </div>

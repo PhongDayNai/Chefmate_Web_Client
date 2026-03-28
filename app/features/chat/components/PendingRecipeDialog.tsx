@@ -53,7 +53,7 @@ export default function PendingRecipeDialog() {
             onClick={() => handleAction("skip_deduction")}
             className="rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm font-black text-gray-700 hover:bg-gray-50 disabled:opacity-50"
           >
-            {loadingAction === "skip_deduction" ? "Đang xử lý..." : "Bỏ qua trừ kho"}
+            {loadingAction === "skip_deduction" ? "Đang xử lý..." : "Bỏ qua trừ tủ lạnh"}
           </button>
           <button
             disabled={sending || !!loadingAction}

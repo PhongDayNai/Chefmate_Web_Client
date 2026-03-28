@@ -28,6 +28,8 @@ import { pantryService } from "~/features/pantry/api/pantryService";
 const AI_BUSY_BACKOFF_MS = [3000, 5000, 8000] as const;
 const MAX_NO_PROGRESS_ATTEMPTS = 2;
 const DEFAULT_LIMIT = 30;
+const LAST_CHAT_SESSION_ID_KEY = "lastChatSessionId";
+const LAST_CHAT_USER_ID_KEY = "lastChatUserId";
 
 type ChatAction =
   | { type: "MERGE"; payload: Partial<ChatUiState> }
@@ -115,6 +117,38 @@ function getUserIdFromStorage(): number | null {
   if (!raw) return null;
   const userId = Number(raw);
   return Number.isFinite(userId) && userId > 0 ? userId : null;
+}
+
+function getPositiveNumberFromStorage(key: string): number | null {
+  if (typeof window === "undefined") return null;
+  const raw = localStorage.getItem(key);
+  if (!raw) return null;
+  const value = Number(raw);
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+function clearStoredLastChatSession() {
+  if (typeof window === "undefined") return;
+  localStorage.removeItem(LAST_CHAT_SESSION_ID_KEY);
+  localStorage.removeItem(LAST_CHAT_USER_ID_KEY);
+}
+
+function persistStoredLastChatSession(userId: number, sessionId: number) {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(LAST_CHAT_USER_ID_KEY, String(userId));
+  localStorage.setItem(LAST_CHAT_SESSION_ID_KEY, String(sessionId));
+}
+
+function getStoredLastChatSessionForUser(userId: number): number | null {
+  const storedUserId = getPositiveNumberFromStorage(LAST_CHAT_USER_ID_KEY);
+  const storedSessionId = getPositiveNumberFromStorage(LAST_CHAT_SESSION_ID_KEY);
+
+  if (!storedUserId || storedUserId !== userId || !storedSessionId) {
+    clearStoredLastChatSession();
+    return null;
+  }
+
+  return storedSessionId;
 }
 
 function extractData(input: any): any {
@@ -249,7 +283,7 @@ function normalizePantryItems(raw: unknown): PantryItem[] {
 }
 
 function messageKey(message: ChatMessage): string {
-  if (message.chatMessageId) return `id:${message.chatMessageId}`;
+  if (message.chatMessageId) return `id:${message.chatSessionId ?? "none"}:${message.chatMessageId}`;
   if (message.tempId) return `temp:${message.tempId}`;
   return `sig:${message.chatSessionId ?? "none"}:${message.role}:${message.content}:${message.createdAt}`;
 }
@@ -269,7 +303,11 @@ function mergeAndSortTimeline(current: ChatMessage[], incoming: ChatMessage[]): 
 
     const idA = a.chatMessageId ?? Number.MAX_SAFE_INTEGER;
     const idB = b.chatMessageId ?? Number.MAX_SAFE_INTEGER;
-    return idA - idB;
+    if (idA !== idB) return idA - idB;
+
+    const sessionA = a.chatSessionId ?? Number.MAX_SAFE_INTEGER;
+    const sessionB = b.chatSessionId ?? Number.MAX_SAFE_INTEGER;
+    return sessionA - sessionB;
   });
 }
 
@@ -339,6 +377,75 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
   const clearPendingPreviousRecipe = useCallback(() => {
     mergeState({ pendingPreviousRecipe: null });
   }, [mergeState]);
+
+  const persistLastSession = useCallback(
+    (sessionId: number | null, userIdParam?: number | null) => {
+      const userId = userIdParam ?? getUserId();
+      if (!userId || !sessionId || sessionId <= 0) {
+        clearStoredLastChatSession();
+        return;
+      }
+      persistStoredLastChatSession(userId, sessionId);
+    },
+    [getUserId],
+  );
+
+  const tryRestoreLastSession = useCallback(async () => {
+    const userId = getUserId();
+    if (!userId) return false;
+
+    const storedSessionId = getStoredLastChatSessionForUser(userId);
+    if (!storedSessionId) return false;
+
+    mergeState({
+      loadingTimeline: true,
+      errorMessage: null,
+      lastRequestedBeforeMessageId: null,
+    });
+
+    try {
+      const res = await chatService.getSessionHistory(storedSessionId, userId);
+      const data = extractData(res);
+      const timeline = mergeAndSortTimeline([], normalizeMessages(data?.messages));
+
+      if (!timeline.length) {
+        persistLastSession(null, userId);
+        return false;
+      }
+
+      // If restored session only contains assistant intro and no user interaction,
+      // treat as non-useful restore and continue fallback to older/unified history.
+      if (!timeline.some((item) => item.role === "user")) {
+        persistLastSession(null, userId);
+        return false;
+      }
+
+      const restoredSession =
+        normalizeSession(data?.session) ??
+        stateRef.current.sessions.find((item) => item.chatSessionId === storedSessionId) ?? {
+          chatSessionId: storedSessionId,
+          userId,
+          title: "Bepes",
+          activeRecipeId: null,
+        };
+
+      mergeState({
+        currentSessionId: restoredSession.chatSessionId,
+        currentSession: restoredSession,
+        timeline,
+        hasMore: false,
+        nextBeforeMessageId: null,
+        noProgressLoadCount: 0,
+      });
+      persistLastSession(restoredSession.chatSessionId, userId);
+      return true;
+    } catch {
+      persistLastSession(null, userId);
+      return false;
+    } finally {
+      mergeState({ loadingTimeline: false });
+    }
+  }, [getUserId, mergeState, persistLastSession]);
 
   const refreshRecommendations = useCallback(async () => {
     const userId = getUserId();
@@ -453,6 +560,7 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
 
           const createdSession = findPrimarySession(createRes);
           if (createdSession) {
+            persistLastSession(createdSession.chatSessionId, userId);
             mergeState({
               currentSessionId: createdSession.chatSessionId,
               currentSession: createdSession,
@@ -507,6 +615,10 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
           noProgressLoadCount: nextNoProgress,
         });
 
+        if (!options.beforeMessageId) {
+          persistLastSession(finalCurrentSession?.chatSessionId ?? null, userId);
+        }
+
         if (
           options.activeRecipeId &&
           options.activeRecipeId > 0 &&
@@ -532,16 +644,68 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
         mergeState({ loadingTimeline: false });
       }
     },
-    [getUserId, loadSessions, mergeState, setError],
+    [getUserId, loadSessions, mergeState, persistLastSession, setError],
   );
 
   const bootstrapUnifiedTimeline = useCallback(
     async (activeRecipeId?: number) => {
       await refreshHomeContext();
-      await fetchUnifiedTimeline({ createSessionIfEmpty: true, activeRecipeId });
+      const normalizedActiveRecipeId = activeRecipeId && activeRecipeId > 0 ? activeRecipeId : undefined;
+      const userId = getUserId();
+      if (!userId) return;
+
+      if (normalizedActiveRecipeId) {
+        await fetchUnifiedTimeline({ createSessionIfEmpty: true, activeRecipeId: normalizedActiveRecipeId });
+        await loadSessions();
+        return;
+      }
+
+      const restored = await tryRestoreLastSession();
+      if (restored) {
+        await loadSessions();
+        return;
+      }
+
+      // Old bubble behavior parity: prefer reading existing history first.
+      await fetchUnifiedTimeline({ createSessionIfEmpty: false });
       await loadSessions();
+
+      const hasUserMessageAfterUnified = stateRef.current.timeline.some((item) => item.role === "user");
+      if (hasUserMessageAfterUnified) return;
+
+      // If unified timeline is not enough, try the latest concrete session histories.
+      const candidates = stateRef.current.sessions.filter((session) => session.chatSessionId > 0);
+
+      for (const session of candidates) {
+        try {
+          const historyRes = await chatService.getSessionHistory(session.chatSessionId, userId);
+          const historyData = extractData(historyRes);
+          const historyTimeline = mergeAndSortTimeline([], normalizeMessages(historyData?.messages));
+          if (!historyTimeline.some((item) => item.role === "user")) continue;
+
+          const historySession = normalizeSession(historyData?.session) ?? session;
+          mergeState({
+            currentSessionId: historySession.chatSessionId,
+            currentSession: historySession,
+            timeline: historyTimeline,
+            hasMore: false,
+            nextBeforeMessageId: null,
+            noProgressLoadCount: 0,
+          });
+          persistLastSession(historySession.chatSessionId, userId);
+          return;
+        } catch {
+          // Keep searching other sessions.
+        }
+      }
+
+      // No history available at all -> preserve current create-session fallback.
+      if (stateRef.current.timeline.length === 0) {
+        await fetchUnifiedTimeline({ createSessionIfEmpty: true });
+        await loadSessions();
+      }
     },
-    [fetchUnifiedTimeline, loadSessions, refreshHomeContext],
+    [fetchUnifiedTimeline, getUserId, loadSessions, mergeState, persistLastSession, refreshHomeContext, tryRestoreLastSession],
   );
 
   const openSession = useCallback(
@@ -565,13 +729,14 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
           nextBeforeMessageId: null,
           noProgressLoadCount: 0,
         });
+        persistLastSession(sessionId, userId);
       } catch (error) {
         setError("Không thể mở hội thoại đã chọn");
       } finally {
         mergeState({ loadingTimeline: false });
       }
     },
-    [getUserId, mergeState, setError],
+    [getUserId, mergeState, persistLastSession, setError],
   );
 
   const sendMessage = useCallback(
@@ -688,6 +853,11 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
           aiBusyRetryCount: 0,
         });
 
+        const nextSessionId = responseSession?.chatSessionId ?? stateRef.current.currentSessionId;
+        if (nextSessionId) {
+          persistLastSession(nextSessionId, userId);
+        }
+
         const paging = responseData?.paging ? normalizePaging(responseData.paging, stateRef.current.limit) : null;
         if (paging) {
           mergeState({
@@ -707,7 +877,7 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
         mergeState({ sending: false });
       }
     },
-    [getUserId, loadSessions, mergeState, setError],
+    [getUserId, loadSessions, mergeState, persistLastSession, setError],
   );
 
   const resolvePendingAction = useCallback(
@@ -742,6 +912,8 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
         await fetchUnifiedTimeline({ createSessionIfEmpty: action !== "continue_current_session" });
         await loadSessions();
 
+        persistLastSession(stateRef.current.currentSessionId, userId);
+
         return true;
       } catch (error) {
         setError("Không thể xử lý phiên trước đó");
@@ -750,7 +922,7 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
         mergeState({ sending: false });
       }
     },
-    [fetchUnifiedTimeline, getUserId, loadSessions, mergeState, setError],
+    [fetchUnifiedTimeline, getUserId, loadSessions, mergeState, persistLastSession, setError],
   );
 
   const completeCurrentSession = useCallback(async () => {
@@ -804,11 +976,13 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
         });
       }
 
+      persistLastSession(stateRef.current.currentSessionId, userId);
+
       toast.success("Đã hoàn thành phiên nấu ăn");
     } catch (error) {
       setError("Không thể hoàn thành phiên hiện tại");
     }
-  }, [fetchUnifiedTimeline, getUserId, loadSessions, mergeState, setError]);
+  }, [fetchUnifiedTimeline, getUserId, loadSessions, mergeState, persistLastSession, setError]);
 
   const loadOlderMessages = useCallback(async () => {
     const current = stateRef.current;
@@ -841,6 +1015,7 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
 
           const session = findPrimarySession(res);
           if (session) {
+            persistLastSession(session.chatSessionId, userId);
             mergeState({
               currentSessionId: session.chatSessionId,
               currentSession: session,
@@ -867,12 +1042,14 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
           });
         }
 
+        persistLastSession(current.currentSessionId, userId);
+
         toast.success("Đã cập nhật món đang nấu cho phiên chat");
       } catch (error) {
         setError("Không thể gắn món ăn vào phiên hiện tại");
       }
     },
-    [fetchUnifiedTimeline, getUserId, loadSessions, mergeState, setError],
+    [fetchUnifiedTimeline, getUserId, loadSessions, mergeState, persistLastSession, setError],
   );
 
   const renameSession = useCallback(
@@ -909,6 +1086,7 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
     async (sessionId: number) => {
       const userId = getUserId();
       if (!userId) return false;
+      const storedSessionId = getStoredLastChatSessionForUser(userId);
 
       try {
         await chatService.deleteSession(sessionId, userId);
@@ -927,13 +1105,17 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
           await fetchUnifiedTimeline({ createSessionIfEmpty: true });
         }
 
+        if (storedSessionId === sessionId || isCurrentDeleted) {
+          persistLastSession(stateRef.current.currentSessionId, userId);
+        }
+
         return true;
       } catch (error) {
         setError("Không thể xóa hội thoại");
         return false;
       }
     },
-    [fetchUnifiedTimeline, getUserId, mergeState, setError],
+    [fetchUnifiedTimeline, getUserId, mergeState, persistLastSession, setError],
   );
 
   const upsertDietNote = useCallback(
@@ -978,6 +1160,7 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
   );
 
   const newSession = useCallback(() => {
+    const userId = getUserId();
     mergeState({
       currentSessionId: null,
       currentSession: null,
@@ -987,7 +1170,8 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
       noProgressLoadCount: 0,
       pendingPreviousRecipe: null,
     });
-  }, [mergeState]);
+    persistLastSession(null, userId);
+  }, [getUserId, mergeState, persistLastSession]);
 
   const value: ChatFlowContextValue = useMemo(
     () => ({

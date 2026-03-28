@@ -8,6 +8,7 @@ import { useAuthGuard } from "~/hooks/useAuthGuard";
 import {
   Camera,
   Plus,
+  Minus,
   Trash2,
   Clock,
   Users,
@@ -20,6 +21,9 @@ import {
 import toast from "react-hot-toast";
 
 export default function CreateRecipe() {
+  const MIN_RATION = 1;
+  const MAX_RATION = 99;
+
   const router = useRouter();
   const { requireAuth } = useAuthGuard();
   const [loading, setLoading] = useState(false);
@@ -72,6 +76,30 @@ export default function CreateRecipe() {
 
   const addStep = () => setSteps([...steps, { content: "" }]);
   const removeStep = (index: number) => setSteps(steps.filter((_, i) => i !== index));
+
+  const sanitizeRation = (value: string) => {
+    const digitsOnly = value.replace(/\D/g, "");
+    if (!digitsOnly) return null;
+
+    const parsed = Number.parseInt(digitsOnly, 10);
+    if (Number.isNaN(parsed)) return null;
+
+    return Math.max(MIN_RATION, Math.min(MAX_RATION, parsed));
+  };
+
+  const handleRationInput = (value: string) => {
+    const sanitized = sanitizeRation(value);
+    if (sanitized === null) return;
+    setFormData((prev) => ({ ...prev, ration: sanitized }));
+  };
+
+  const increaseRation = () => {
+    setFormData((prev) => ({ ...prev, ration: Math.min(MAX_RATION, prev.ration + 1) }));
+  };
+
+  const decreaseRation = () => {
+    setFormData((prev) => ({ ...prev, ration: Math.max(MIN_RATION, prev.ration - 1) }));
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -192,7 +220,40 @@ export default function CreateRecipe() {
                 <div className="p-3 bg-orange-50 rounded-2xl text-[#f59127]"><Users /></div>
                 <div className="flex-1">
                   <p className="text-[10px] font-black uppercase text-gray-400">Khẩu phần</p>
-                  <input type="number" value={formData.ration} onChange={e => setFormData({...formData, ration: parseInt(e.target.value)})} className="font-bold outline-none w-full" />
+                  <div className="flex items-center justify-between gap-2 rounded-2xl bg-gray-50 px-2 py-1.5 ring-1 ring-transparent transition-all focus-within:bg-white focus-within:ring-[#f59127]/40">
+                    <button
+                      type="button"
+                      onClick={decreaseRation}
+                      disabled={formData.ration <= MIN_RATION}
+                      className="p-2 rounded-xl text-gray-500 hover:bg-gray-100 hover:text-gray-800 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                      aria-label="Giảm khẩu phần"
+                    >
+                      <Minus size={16} />
+                    </button>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      value={formData.ration}
+                      onChange={(e) => handleRationInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (["e", "E", "+", "-", ".", ","].includes(e.key)) {
+                          e.preventDefault();
+                        }
+                      }}
+                      className="w-full bg-transparent text-center font-bold outline-none"
+                      aria-label="Khẩu phần"
+                    />
+                    <button
+                      type="button"
+                      onClick={increaseRation}
+                      disabled={formData.ration >= MAX_RATION}
+                      className="p-2 rounded-xl text-gray-500 hover:bg-gray-100 hover:text-gray-800 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                      aria-label="Tăng khẩu phần"
+                    >
+                      <Plus size={16} />
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
