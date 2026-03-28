@@ -5,13 +5,15 @@ import type { Recipe } from "../types";
 interface Props {
   recipes: Recipe[];
   title?: string;
+  isLoading?: boolean;
+  emptyText?: string;
 }
 
-export default function RecipeList({ recipes, title }: Props) {
+export default function RecipeList({ recipes, title, isLoading = false, emptyText = "Chưa có món nào phù hợp." }: Props) {
   if (recipes.length === 0) {
     return (
       <div className="text-center py-10">
-        <p className="text-gray-500">Đang tải món ăn ngon...</p>
+        <p className="text-gray-500">{isLoading ? "Đang tải món ăn ngon..." : emptyText}</p>
       </div>
     );
   }

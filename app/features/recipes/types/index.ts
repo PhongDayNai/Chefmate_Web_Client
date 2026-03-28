@@ -45,3 +45,32 @@ export interface Recipe {
   
   comments: Comment[]; 
 }
+
+export type TrendingPeriod = "all" | "7d" | "30d" | "90d";
+
+export interface TrendingV2Pagination {
+  page: number;
+  limit: number;
+  total: number;
+  totalPages: number;
+  hasMore: boolean;
+}
+
+export interface TrendingTimeContext {
+  serverHour: number;
+  bucket: string;
+}
+
+export interface TrendingV2Data {
+  items: Recipe[];
+  pagination: TrendingV2Pagination;
+  period: TrendingPeriod;
+  timeContext?: TrendingTimeContext;
+  apiVersion?: string;
+}
+
+export interface TrendingV2Response {
+  success: boolean;
+  data: TrendingV2Data;
+  message?: string;
+}

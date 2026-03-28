@@ -1,20 +1,24 @@
 import axios from "axios";
 import { checkAuth } from "~/utils/authUtils";
 import { buildApiUrl } from "~/lib/apiConfig";
+import type { TrendingPeriod, TrendingV2Response } from "~/features/recipes/types";
 
 const BASE_URL = buildApiUrl("/api/recipes");
 
-export const recipeService = {
-  getTrending: async (page = 1, limit = 20) => {
-    const response = await axios.get(`${BASE_URL}/trending-v2`, {
-      params: { page, limit, period: "all" },
-    });
-    return response.data;
-  },
+interface GetTrendingV2Params {
+  userId?: number;
+  page?: number;
+  limit?: number;
+  period?: TrendingPeriod;
+}
 
-  getTopTrendingLegacy: async (userId = 0) => {
-    const response = await axios.post(`${BASE_URL}/top-trending`, { userId });
-    return response.data;
+export const recipeService = {
+  getTrendingV2: async ({ userId, page = 1, limit = 20, period = "all" }: GetTrendingV2Params = {}) => {
+    const safeLimit = Math.min(Math.max(limit, 1), 50);
+    const response = await axios.get(`${BASE_URL}/trending-v2`, {
+      params: { userId, page, limit: safeLimit, period },
+    });
+    return response.data as TrendingV2Response;
   },
 
   getRecipeById: async (id: number) => {
