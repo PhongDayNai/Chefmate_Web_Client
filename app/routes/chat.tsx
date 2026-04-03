@@ -4,28 +4,25 @@ import { Fragment, useCallback, useEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Bot,
-  CheckCircle2,
   ChevronLeft,
-  ChevronUp,
-  Clock3,
+  CheckCircle2,
   Loader2,
   Pencil,
   Send,
   Trash2,
-  User as UserIcon,
-  Utensils,
   X,
 } from "lucide-react";
-import ChatMessageContent from "~/features/chat/components/ChatMessageContent";
 import NeedLoginCard from "~/features/chat/components/NeedLoginCard";
 import { formatSessionTimeLabel, shouldShowSessionDivider } from "~/features/chat/utils/chatTime";
-import {
-  DIET_NOTE_TYPE_OPTIONS,
-  recommendationToneClasses,
-  useChatViewModel,
-} from "~/features/chat/hooks/useChatViewModel";
+import { DIET_NOTE_TYPE_OPTIONS, useChatViewModel } from "~/features/chat/hooks/useChatViewModel";
 import type { DietNoteType } from "~/features/chat/types";
 import { useAuthGuard } from "~/hooks/useAuthGuard";
+import ChatContextCard from "~/features/chat/components/ChatContextCard";
+import ChatMessageBubble from "~/features/chat/components/ChatMessageBubble";
+import CompleteMealDialog from "~/features/chat/components/CompleteMealDialog";
+import MealPickerDialog from "~/features/chat/components/MealPickerDialog";
+import PendingPrimarySwitchDialog from "~/features/chat/components/PendingPrimarySwitchDialog";
+import SelectedRecipesDialog from "~/features/chat/components/SelectedRecipesDialog";
 
 export default function ChatPage() {
   const router = useRouter();
@@ -47,26 +44,45 @@ export default function ChatPage() {
     setShowRecipePicker,
     showDietModal,
     setShowDietModal,
+    showRecipeDialog,
+    setShowRecipeDialog,
+    showCompleteDialog,
+    setShowCompleteDialog,
     dietNoteLabel,
     setDietNoteLabel,
     dietNoteType,
     setDietNoteType,
     recommendationGroups,
-    activeRecommendation,
+    activeRecipeLabel,
     dietSummary,
     canCompleteSession,
+    canMutateMeal,
+    canSendMessage,
+    retryNow,
+    highlightedRecipeId,
+    loadingRecipes,
+    selectedRecipeEntries,
     handleTimelineScroll,
     autoScrollTimeline,
     handleSend,
-    handleOpenRecipe,
+    handleRetryMessage,
     handleOpenRecipePicker,
-    handleSelectRecipe,
+    handleAddRecipeToMeal,
+    handleRemoveMealRecipe,
+    handleMoveMealRecipe,
+    handleSetPrimaryRecipe,
+    handleChangeMealStatus,
+    handleOpenRecipes,
+    handleOpenRecipeFromDialog,
     handleOpenDietModal,
     handleAddDietNote,
     handleToggleDietNote,
     handleEditDietNote,
     handleDeleteDietNote,
-    handleCompleteSession,
+    handleOpenCompleteDialog,
+    handleConfirmCompleteSession,
+    handleConfirmPendingPrimarySwitch,
+    handleClosePendingPrimarySwitch,
   } = useChatViewModel({
     ensureAuth: requireAuth,
     recipeIdParam,
@@ -122,67 +138,24 @@ export default function ChatPage() {
         <div className="px-4 pt-4">{!isLoggedIn ? <NeedLoginCard /> : null}</div>
 
         <div className="px-4 pt-3">
-          <div className="rounded-[1.8rem] border border-[#ded4c5] bg-[#f2ece2] p-4 text-[#263444] shadow-sm">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-[18px] font-semibold leading-relaxed">
-                  Món đang chọn:{" "}
-                  <span className="font-black">
-                    {activeRecommendation?.recipeName || "Chưa chọn món"}
-                  </span>
-                </p>
-                <p className="mt-1 truncate text-base font-semibold leading-relaxed">
-                  Ghi chú ăn uống: <span className="font-black">{dietSummary}</span>
-                </p>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setShowContextActions((prev) => !prev)}
-                className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl border border-gray-300 bg-white text-gray-500 hover:border-[#f59127] hover:text-[#f59127]"
-                title={showContextActions ? "Ẩn thao tác" : "Hiện thao tác"}
-              >
-                <span className={`transition-transform duration-300 ${showContextActions ? "rotate-0" : "rotate-180"}`}>
-                  <ChevronUp size={18} />
-                </span>
-              </button>
-            </div>
-
-            <div
-              className={`grid grid-cols-1 gap-3 overflow-hidden transition-all duration-300 ease-out sm:grid-cols-2 ${
-                showContextActions ? "mt-4 max-h-40 opacity-100" : "pointer-events-none mt-0 max-h-0 opacity-0"
-              }`}
-            >
-              <button
-                onClick={() => void handleOpenRecipePicker()}
-                className="rounded-full bg-[#ffe8c8] px-5 py-3.5 text-lg font-black text-[#f26f12] transition hover:brightness-95"
-              >
-                Chọn món
-              </button>
-              <button
-                onClick={() => void handleOpenDietModal()}
-                className="rounded-full bg-[#d4e9f9] px-5 py-3.5 text-lg font-black text-[#116ca7] transition hover:brightness-95"
-              >
-                Ghi chú
-              </button>
-              <button
-                onClick={() => void handleOpenRecipe()}
-                className="rounded-full bg-[#ddd7f2] px-5 py-3.5 text-lg font-black text-[#5c39c8] transition hover:brightness-95"
-              >
-                Xem công thức
-              </button>
-              <button
-                onClick={() => void handleCompleteSession()}
-                disabled={!canCompleteSession}
-                className="rounded-full border border-[#7dd59a] bg-[#d3f0dc] px-5 py-3.5 text-lg font-black text-[#1b7f43] transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                Hoàn thành
-              </button>
-            </div>
-          </div>
+          <ChatContextCard
+            activeRecipeLabel={activeRecipeLabel}
+            dietSummary={dietSummary}
+            mealCount={state.mealItems.length}
+            needsSelection={state.mealSession.needsSelection}
+            uiClosed={state.mealSession.uiClosed}
+            showActions={showContextActions}
+            canComplete={canCompleteSession}
+            canMutateMeal={canMutateMeal}
+            onToggleActions={() => setShowContextActions((prev) => !prev)}
+            onOpenMealPicker={() => void handleOpenRecipePicker()}
+            onOpenDietNotes={() => void handleOpenDietModal()}
+            onOpenRecipes={() => void handleOpenRecipes()}
+            onOpenComplete={handleOpenCompleteDialog}
+          />
         </div>
 
-        <div ref={timelineRef} className="flex-1 overflow-y-auto px-4 pb-3 pt-4 custom-scrollbar">
+        <div ref={timelineRef} className="custom-scrollbar flex-1 overflow-y-auto px-4 pb-3 pt-4">
           {state.loadingTimeline && state.timeline.length > 0 ? (
             <div className="mb-3 flex justify-center">
               <Loader2 className="h-5 w-5 animate-spin text-[#f59127]" />
@@ -199,9 +172,9 @@ export default function ChatPage() {
             <div className="flex h-full items-center justify-center">
               <div className="max-w-xl rounded-[1.8rem] border border-[#eadbc1] bg-[#f7e7cf] p-6 text-[#1f2937] shadow-sm">
                 <p className="text-2xl font-black text-[#f57a14]">Bepes</p>
-                <p className="mt-3 text-[30px] leading-snug font-bold">Nhấn gửi để bắt đầu cuộc trò chuyện với Bepes.</p>
+                <p className="mt-3 text-[30px] font-bold leading-snug">Nhấn gửi để bắt đầu cuộc trò chuyện với Bepes.</p>
                 <p className="mt-2 text-lg leading-relaxed text-[#344455]">
-                  Mình sẽ bám đúng ngữ cảnh món đang chọn và tình trạng tủ lạnh của bạn.
+                  Mình sẽ bám theo meal session hiện tại, thứ tự món đã chọn và ghi chú ăn uống của bạn.
                 </p>
               </div>
             </div>
@@ -217,37 +190,22 @@ export default function ChatPage() {
               const showSessionDivider = shouldShowSessionDivider(state.timeline, index);
               const sessionTimeLabel = formatSessionTimeLabel(msg.createdAt);
 
-                return (
-                  <Fragment key={renderKey}>
-                    {showSessionDivider ? (
-                      <div className="flex items-center gap-3 py-1">
-                        <div className="h-px flex-1 bg-[#d7dde5]" />
-                        <span className="text-[11px] font-semibold text-[#9ca3af]">{sessionTimeLabel}</span>
-                        <div className="h-px flex-1 bg-[#d7dde5]" />
-                      </div>
-                    ) : null}
-                    <div className={`flex gap-3 ${msg.role === "user" ? "flex-row-reverse" : ""}`}>
-                    <div
-                      className={`mt-1 flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full ${
-                        msg.role === "user"
-                          ? "bg-[#ff8f2a] text-white"
-                          : "border border-[#ebd7b8] bg-[#fff4e3] text-[#f57a14]"
-                      }`}
-                    >
-                      {msg.role === "user" ? <UserIcon size={15} /> : <Bot size={15} />}
+              return (
+                <Fragment key={renderKey}>
+                  {showSessionDivider ? (
+                    <div className="flex items-center gap-3 py-1">
+                      <div className="h-px flex-1 bg-[#d7dde5]" />
+                      <span className="text-[11px] font-semibold text-[#9ca3af]">{sessionTimeLabel}</span>
+                      <div className="h-px flex-1 bg-[#d7dde5]" />
                     </div>
+                  ) : null}
 
-                    <div
-                      className={`max-w-[85%] rounded-[1.6rem] px-4 py-3 text-[19px] leading-relaxed shadow-sm whitespace-pre-wrap ${
-                        msg.role === "user"
-                          ? "rounded-tr-md bg-[#ff8f2a] text-white"
-                          : "rounded-tl-md border border-[#ebd9c3] bg-[#f7e7cf] text-[#1f2937]"
-                      } ${msg.isPending ? "opacity-70" : ""}`}
-                    >
-                      {msg.role === "assistant" ? <p className="mb-1 text-2xl font-black text-[#f57a14]">Bepes</p> : null}
-                      <ChatMessageContent role={msg.role} content={msg.content} />
-                    </div>
-                  </div>
+                  <ChatMessageBubble
+                    message={msg}
+                    retryNow={retryNow}
+                    showAssistantLabel
+                    onRetry={(tempId) => void handleRetryMessage(tempId)}
+                  />
                 </Fragment>
               );
             })}
@@ -258,7 +216,7 @@ export default function ChatPage() {
                   <Loader2 size={15} className="animate-spin" />
                 </div>
                 <div className="rounded-[1.6rem] rounded-tl-md border border-[#ebd9c3] bg-[#f7e7cf] px-4 py-3 text-base font-medium italic text-[#7b7f8a]">
-                  Bepes đang soạn phản hồi{state.aiBusyRetryCount > 0 ? ` (retry ${state.aiBusyRetryCount}/3)` : ""}...
+                  Bepes đang soạn phản hồi...
                 </div>
               </div>
             ) : null}
@@ -276,12 +234,13 @@ export default function ChatPage() {
             <input
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="Nhắn Bepes..."
-              className="h-11 flex-1 bg-transparent text-[18px] text-[#1f2937] placeholder:text-[#a1a7b6] outline-none"
+              disabled={!canSendMessage}
+              placeholder={state.mealSession.uiClosed ? "Phiên này đã hoàn tất. Hãy chọn món mới để tiếp tục." : "Nhắn Bepes..."}
+              className="h-11 flex-1 bg-transparent text-[18px] text-[#1f2937] outline-none placeholder:text-[#a1a7b6] disabled:cursor-not-allowed disabled:text-gray-400"
             />
             <button
               type="submit"
-              disabled={state.sending || !input.trim() || !isLoggedIn}
+              disabled={state.sending || !input.trim() || !isLoggedIn || !canSendMessage}
               className="flex h-12 w-12 items-center justify-center rounded-full bg-[#ff7a16] text-white transition hover:bg-[#ea6f12] disabled:cursor-not-allowed disabled:opacity-45"
             >
               <Send size={19} />
@@ -290,80 +249,45 @@ export default function ChatPage() {
         </div>
       </section>
 
-      {showRecipePicker ? (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/40 p-4">
-          <div className="flex max-h-[84vh] w-full max-w-3xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
-              <div>
-                <h3 className="text-xl font-black text-gray-900">Chọn món cho phiên hiện tại</h3>
-                <p className="mt-1 text-sm text-gray-500">Chọn món để Bepes trả lời đúng ngữ cảnh món ăn của bạn.</p>
-              </div>
-              <button onClick={() => setShowRecipePicker(false)} className="rounded-xl p-2 text-gray-400 hover:bg-gray-100">
-                <X size={18} />
-              </button>
-            </div>
+      <MealPickerDialog
+        isOpen={showRecipePicker}
+        mealItems={state.mealItems}
+        recommendationGroups={recommendationGroups}
+        activeRecipeId={state.mealSession.activeRecipeId}
+        highlightedRecipeId={highlightedRecipeId}
+        isLocked={state.mealSession.uiClosed}
+        isSaving={state.mealSyncing}
+        onClose={() => setShowRecipePicker(false)}
+        onAddRecipe={(item) => void handleAddRecipeToMeal(item)}
+        onRemoveRecipe={(recipeId) => void handleRemoveMealRecipe(recipeId)}
+        onMoveRecipe={(recipeId, direction) => void handleMoveMealRecipe(recipeId, direction)}
+        onSetPrimaryRecipe={(recipeId) => void handleSetPrimaryRecipe(recipeId)}
+        onChangeStatus={(recipeId, status) => void handleChangeMealStatus(recipeId, status)}
+      />
 
-            <div className="space-y-4 overflow-y-auto p-5">
-              {recommendationGroups.some((group) => group.items.length > 0) ? (
-                recommendationGroups.map((group) => (
-                  <div key={group.key} className={`rounded-2xl border p-4 ${recommendationToneClasses(group.key)}`}>
-                    <div className="mb-3 flex items-center justify-between">
-                      <div>
-                        <h4 className="text-base font-black text-gray-800">{group.title}</h4>
-                        <p className="text-xs text-gray-500">{group.description}</p>
-                      </div>
-                      <span className="rounded-full bg-white/90 px-3 py-1 text-xs font-bold text-gray-600">
-                        {group.items.length} món
-                      </span>
-                    </div>
+      <SelectedRecipesDialog
+        isOpen={showRecipeDialog}
+        loading={loadingRecipes}
+        entries={selectedRecipeEntries}
+        onClose={() => setShowRecipeDialog(false)}
+        onOpenRecipe={handleOpenRecipeFromDialog}
+      />
 
-                    {group.items.length ? (
-                      <div className="space-y-2">
-                        {group.items.map((item, index) => {
-                          const isActiveRecipe = state.currentSession?.activeRecipeId === item.recipeId;
+      <PendingPrimarySwitchDialog
+        isOpen={Boolean(state.pendingPrimarySwitch)}
+        pendingSwitch={state.pendingPrimarySwitch}
+        mealItems={state.mealItems}
+        loading={state.mealSyncing}
+        onClose={handleClosePendingPrimarySwitch}
+        onConfirm={(recipeId) => void handleConfirmPendingPrimarySwitch(recipeId)}
+      />
 
-                          return (
-                            <button
-                              key={`${group.key}-${item.recipeId}-${index}`}
-                              onClick={() => void handleSelectRecipe(item)}
-                              className="flex w-full items-start justify-between gap-4 rounded-xl border border-white/70 bg-white/80 px-3 py-2 text-left transition hover:border-[#f59127] hover:bg-white"
-                            >
-                              <div>
-                                <p className="font-bold text-gray-800">{item.recipeName}</p>
-                                <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-500">
-                                  <span className="inline-flex items-center gap-1">
-                                    <Clock3 size={12} /> {item.cookingTime || "Chưa rõ thời gian"}
-                                  </span>
-                                  <span className="inline-flex items-center gap-1">
-                                    <Utensils size={12} /> {item.ration || 0} khẩu phần
-                                  </span>
-                                  {typeof item.missingIngredientsCount === "number" ? (
-                                    <span>Thiếu {item.missingIngredientsCount} nguyên liệu</span>
-                                  ) : null}
-                                </div>
-                              </div>
-
-                              {isActiveRecipe ? (
-                                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-1 text-xs font-bold text-emerald-700">
-                                  <CheckCircle2 size={12} /> Đang chọn
-                                </span>
-                              ) : null}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      <p className="rounded-xl bg-white/70 px-4 py-3 text-sm text-gray-500">Hiện chưa có món ở nhóm này.</p>
-                    )}
-                  </div>
-                ))
-              ) : (
-                <p className="py-16 text-center text-sm text-gray-400">Chưa có gợi ý món nào từ tủ lạnh.</p>
-              )}
-            </div>
-          </div>
-        </div>
-      ) : null}
+      <CompleteMealDialog
+        isOpen={showCompleteDialog}
+        loading={state.mealSyncing}
+        onClose={() => setShowCompleteDialog(false)}
+        onSubmit={(payload) => void handleConfirmCompleteSession(payload)}
+      />
 
       {showDietModal ? (
         <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/40 p-4">

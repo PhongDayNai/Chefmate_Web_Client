@@ -3,21 +3,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
-import type { ChatRecommendation, DietNote, DietNoteType } from "~/features/chat/types";
+import type {
+  ChatRecommendation,
+  DietNote,
+  DietNoteType,
+  MealCompletionType,
+  MealItem,
+  MealRecipeStatus,
+  MealRemainingStatus,
+} from "~/features/chat/types";
 import { useChatFlow } from "~/features/chat/state/ChatFlowProvider";
 import { recipeService } from "~/features/recipes/api/recipeService";
+import type { MealPickerGroup } from "~/features/chat/components/MealPickerDialog";
 
 export const CHAT_SCROLL_TOP_LOAD_THRESHOLD = 80;
 export const CHAT_SCROLL_BOTTOM_THRESHOLD = 120;
-
-export type RecommendationGroupTone = "ready" | "almost" | "unavailable";
-
-export interface RecommendationGroup {
-  key: RecommendationGroupTone;
-  title: string;
-  description: string;
-  items: ChatRecommendation[];
-}
 
 interface UseChatViewModelOptions {
   ensureAuth: () => boolean;
@@ -48,10 +48,36 @@ function buildDietSummary(notes: DietNote[]): string {
   return `${active[0].label}, ${active[1].label} +${active.length - 2}`;
 }
 
-export function recommendationToneClasses(tone: RecommendationGroupTone): string {
-  if (tone === "ready") return "border-emerald-200 bg-emerald-50";
-  if (tone === "almost") return "border-amber-200 bg-amber-50";
-  return "border-slate-200 bg-slate-50";
+function moveMealItem(items: MealItem[], recipeId: number, direction: "up" | "down"): MealItem[] {
+  const next = [...items];
+  const currentIndex = next.findIndex((item) => item.recipeId === recipeId);
+  if (currentIndex < 0) return items;
+  const targetIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1;
+  if (targetIndex < 0 || targetIndex >= next.length) return items;
+  const [removed] = next.splice(currentIndex, 1);
+  next.splice(targetIndex, 0, removed);
+  return next.map((item, index) => ({
+    ...item,
+    sortOrder: index + 1,
+  }));
+}
+
+function buildMealItemFromRecommendation(item: ChatRecommendation, sortOrder: number): MealItem {
+  return {
+    recipeId: item.recipeId,
+    recipeName: item.recipeName,
+    sortOrder,
+    status: "pending",
+    note: null,
+    servingsOverride: null,
+  };
+}
+
+function buildRecipeCacheEntries(recipes: any[]): Record<number, any> {
+  return recipes.reduce<Record<number, any>>((acc, item) => {
+    acc[item.recipeId] = item;
+    return acc;
+  }, {});
 }
 
 export function useChatViewModel({
@@ -67,12 +93,17 @@ export function useChatViewModel({
     getUserId,
     bootstrapUnifiedTimeline,
     sendMessage,
+    retryMessage,
     loadOlderMessages,
     refreshRecommendations,
     refreshDietNotes,
     upsertDietNote,
     deleteDietNote,
-    selectRecipeForCurrentSession,
+    syncMealSelection,
+    setPrimaryRecipe,
+    updateMealRecipeStatus,
+    confirmPendingPrimarySwitch,
+    clearPendingPrimarySwitch,
     completeCurrentSession,
   } = useChatFlow();
 
@@ -80,13 +111,20 @@ export function useChatViewModel({
   const [showContextActions, setShowContextActions] = useState(true);
   const [showRecipePicker, setShowRecipePicker] = useState(false);
   const [showDietModal, setShowDietModal] = useState(false);
+  const [showRecipeDialog, setShowRecipeDialog] = useState(false);
+  const [showCompleteDialog, setShowCompleteDialog] = useState(false);
   const [dietNoteLabel, setDietNoteLabel] = useState("");
   const [dietNoteType, setDietNoteType] = useState<DietNoteType>("allergy");
   const [resolvedUserId, setResolvedUserId] = useState<number | null>(null);
+  const [highlightedRecipeId, setHighlightedRecipeId] = useState<number | null>(null);
+  const [recipeCache, setRecipeCache] = useState<Record<number, any>>({});
+  const [loadingRecipes, setLoadingRecipes] = useState(false);
+  const [retryNow, setRetryNow] = useState(Date.now());
 
   const nearBottomRef = useRef(true);
-  const consumedRecipeParamRef = useRef<number | null>(null);
   const bootstrappingRef = useRef(false);
+  const consumedRecipeParamRef = useRef<number | null>(null);
+  const autoOpenedNeedSelectionRef = useRef<string | null>(null);
 
   useEffect(() => {
     setResolvedUserId(readUserIdFromStorage());
@@ -98,68 +136,71 @@ export function useChatViewModel({
   const userId = resolvedUserId;
   const isLoggedIn = Boolean(resolvedUserId);
 
-  const recommendationGroups = useMemo<RecommendationGroup[]>(
+  const recommendationGroups = useMemo<MealPickerGroup[]>(
     () => [
       {
         key: "ready",
-        title: "Sẵn sàng nấu",
-        description: "Đủ nguyên liệu để bắt đầu ngay",
+        title: "Có thể nấu ngay",
+        description: "Đủ nguyên liệu để bắt đầu ngay lúc này.",
         items: state.readyToCook || [],
       },
       {
         key: "almost",
-        title: "Gần đủ nguyên liệu",
-        description: "Thiếu ít nguyên liệu, có thể thay thế",
+        title: "Còn thiếu 1 chút",
+        description: "Thiếu ít nguyên liệu, có thể cân nhắc thay thế hoặc mua nhanh.",
         items: state.almostReady || [],
       },
       {
         key: "unavailable",
-        title: "Chưa đủ nguyên liệu",
-        description: "Cần bổ sung thêm trước khi nấu",
+        title: "Món đề xuất",
+        description: "Các món đáng tham khảo thêm cho bữa hiện tại.",
         items: state.unavailable || [],
       },
     ],
     [state.almostReady, state.readyToCook, state.unavailable],
   );
 
-  const activeRecommendation = useMemo(() => {
-    if (!state.currentSession?.activeRecipeId) return null;
-    const activeId = state.currentSession.activeRecipeId;
+  const activeMealItem = useMemo(() => {
+    if (!state.mealSession.activeRecipeId) return null;
+    return state.mealItems.find((item) => item.recipeId === state.mealSession.activeRecipeId) || null;
+  }, [state.mealItems, state.mealSession.activeRecipeId]);
 
-    const source = [state.recommendations, state.readyToCook, state.almostReady, state.unavailable];
-    for (const group of source) {
-      const found = group.find((item) => item.recipeId === activeId);
-      if (found) return found;
-    }
-
-    return null;
-  }, [
-    state.almostReady,
-    state.currentSession?.activeRecipeId,
-    state.readyToCook,
-    state.recommendations,
-    state.unavailable,
-  ]);
-
-  const hasActiveRecipe = Boolean(state.currentSession?.activeRecipeId);
-  const hasUserMessageInCurrentSession = useMemo(() => {
-    if (!state.currentSessionId) return false;
-
-    return state.timeline.some((item) => {
-      if (item.role !== "user") return false;
-      if (item.isPending) return false;
-      if (!item.content.trim()) return false;
-      if (item.chatSessionId && item.chatSessionId !== state.currentSessionId) return false;
-      return true;
-    });
-  }, [state.currentSessionId, state.timeline]);
-  const canCompleteSession = Boolean(state.currentSessionId && hasUserMessageInCurrentSession && !state.sending);
+  const activeRecipeLabel = activeMealItem?.recipeName || "Chưa chọn món";
   const dietSummary = useMemo(() => buildDietSummary(state.dietNotes), [state.dietNotes]);
+  const canCompleteSession = Boolean(
+    state.mealSession.chatSessionId && !state.mealSession.uiClosed && !state.mealSyncing && !state.sending,
+  );
+  const canMutateMeal = Boolean(!state.mealSession.uiClosed && !state.mealSyncing && !state.sending);
+  const canSendMessage = Boolean(!state.mealSession.uiClosed && !state.sending);
+
+  const selectedRecipeEntries = useMemo(
+    () =>
+      state.mealItems.map((mealItem) => ({
+        mealItem,
+        recipe: recipeCache[mealItem.recipeId] ?? null,
+      })),
+    [recipeCache, state.mealItems],
+  );
 
   useEffect(() => {
     if (!syncContextActionsWhen) return;
-    setShowContextActions(!hasActiveRecipe);
-  }, [hasActiveRecipe, syncContextActionsWhen]);
+    setShowContextActions(true);
+  }, [syncContextActionsWhen, state.mealSession.chatSessionId]);
+
+  useEffect(() => {
+    const hasRetryableMessages = state.timeline.some((item) => {
+      if (!item.isFailed || !item.retryable || !item.retryAvailableAt) return false;
+      return new Date(item.retryAvailableAt).getTime() > Date.now();
+    });
+
+    if (!hasRetryableMessages) return;
+    const interval = window.setInterval(() => setRetryNow(Date.now()), 1000);
+    return () => window.clearInterval(interval);
+  }, [state.timeline]);
+
+  useEffect(() => {
+    setRetryNow(Date.now());
+  }, [state.timeline]);
 
   useEffect(() => {
     const latestUserId = readUserIdFromStorage();
@@ -169,13 +210,6 @@ export function useChatViewModel({
 
     const effectiveUserId = latestUserId ?? resolvedUserId;
     if (!bootstrapWhen || !effectiveUserId) return;
-
-    const activeRecipeId = recipeIdParam && recipeIdParam > 0 ? recipeIdParam : undefined;
-    const hasRecipeParam = Boolean(activeRecipeId);
-
-    // Nếu có recipeId thì chỉ bootstrap một lần cho recipe đó.
-    if (hasRecipeParam && consumedRecipeParamRef.current === activeRecipeId) return;
-
     if (bootstrappingRef.current) return;
 
     let cancelled = false;
@@ -183,29 +217,54 @@ export function useChatViewModel({
     const run = async () => {
       bootstrappingRef.current = true;
       try {
-        await bootstrapUnifiedTimeline(activeRecipeId);
-
-        if (!cancelled && activeRecipeId && onRecipeParamConsumed && consumedRecipeParamRef.current !== activeRecipeId) {
-          consumedRecipeParamRef.current = activeRecipeId;
-          onRecipeParamConsumed();
-        }
+        await bootstrapUnifiedTimeline();
       } finally {
-        bootstrappingRef.current = false;
+        if (!cancelled) {
+          bootstrappingRef.current = false;
+        }
       }
     };
 
-    run();
+    void run();
 
     return () => {
       cancelled = true;
     };
-  }, [
-    bootstrapUnifiedTimeline,
-    bootstrapWhen,
-    onRecipeParamConsumed,
-    recipeIdParam,
-    resolvedUserId,
-  ]);
+  }, [bootstrapUnifiedTimeline, bootstrapWhen, resolvedUserId]);
+
+  useEffect(() => {
+    if (!recipeIdParam || recipeIdParam <= 0) return;
+    if (consumedRecipeParamRef.current === recipeIdParam) return;
+    if (!userId) return;
+
+    let cancelled = false;
+
+    const run = async () => {
+      await refreshRecommendations();
+      if (cancelled) return;
+
+      setHighlightedRecipeId(recipeIdParam);
+      setShowRecipePicker(true);
+      consumedRecipeParamRef.current = recipeIdParam;
+      onRecipeParamConsumed?.();
+    };
+
+    void run();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [onRecipeParamConsumed, recipeIdParam, refreshRecommendations, userId]);
+
+  useEffect(() => {
+    if (!state.mealSession.needsSelection || state.mealSession.uiClosed) return;
+
+    const autoPromptKey = `${state.mealSession.chatSessionId ?? "none"}:${state.mealItems.length}:${state.mealSession.activeRecipeId ?? "none"}`;
+    if (autoOpenedNeedSelectionRef.current === autoPromptKey) return;
+
+    autoOpenedNeedSelectionRef.current = autoPromptKey;
+    setShowRecipePicker(true);
+  }, [state.mealItems.length, state.mealSession.activeRecipeId, state.mealSession.chatSessionId, state.mealSession.needsSelection, state.mealSession.uiClosed]);
 
   const ensureUserId = useCallback(() => {
     if (!ensureAuth()) return null;
@@ -221,64 +280,40 @@ export function useChatViewModel({
       nearBottomRef.current = distanceToBottom < CHAT_SCROLL_BOTTOM_THRESHOLD;
 
       if (container.scrollTop <= CHAT_SCROLL_TOP_LOAD_THRESHOLD) {
-        loadOlderMessages();
+        void loadOlderMessages();
       }
     },
     [loadOlderMessages],
   );
 
-  const autoScrollTimeline = useCallback((container: HTMLDivElement) => {
-    if (nearBottomRef.current || state.sending) {
-      container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
-    }
-  }, [state.sending]);
+  const autoScrollTimeline = useCallback(
+    (container: HTMLDivElement) => {
+      if (nearBottomRef.current || state.sending) {
+        container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
+      }
+    },
+    [state.sending],
+  );
 
   const handleSend = useCallback(async () => {
     const uid = ensureUserId();
     if (!uid) return;
 
     const message = input.trim();
-    if (!message || state.sending) return;
+    if (!message || !canSendMessage) return;
 
     setInput("");
     await sendMessage(message);
-  }, [ensureUserId, input, sendMessage, state.sending]);
+  }, [canSendMessage, ensureUserId, input, sendMessage]);
 
-  const handleOpenRecipe = useCallback(async () => {
-    const uid = ensureUserId();
-    if (!uid) return;
-
-    if (state.currentSession?.activeRecipeId) {
-      router.push(`/recipe/${state.currentSession.activeRecipeId}`);
-      return;
-    }
-
-    if (!activeRecommendation?.recipeName) {
-      toast.error("Phiên hiện tại chưa có món đang nấu");
-      return;
-    }
-
-    try {
-      const res = await recipeService.searchRecipes(activeRecommendation.recipeName, uid);
-      const items = Array.isArray(res?.data) ? res.data : [];
-
-      if (!items.length) {
-        toast.error("Không tìm thấy công thức phù hợp");
-        return;
-      }
-
-      const matched =
-        items.find((item: { recipeId?: number }) => item.recipeId === activeRecommendation.recipeId) || items[0];
-      if (!matched?.recipeId) {
-        toast.error("Không tìm thấy công thức phù hợp");
-        return;
-      }
-
-      router.push(`/recipe/${matched.recipeId}`);
-    } catch {
-      toast.error("Không thể mở công thức từ chat context");
-    }
-  }, [activeRecommendation?.recipeId, activeRecommendation?.recipeName, ensureUserId, router, state.currentSession?.activeRecipeId]);
+  const handleRetryMessage = useCallback(
+    async (tempId: string) => {
+      const uid = ensureUserId();
+      if (!uid) return;
+      await retryMessage(tempId);
+    },
+    [ensureUserId, retryMessage],
+  );
 
   const handleOpenRecipePicker = useCallback(async () => {
     const uid = ensureUserId();
@@ -287,12 +322,100 @@ export function useChatViewModel({
     setShowRecipePicker(true);
   }, [ensureUserId, refreshRecommendations]);
 
-  const handleSelectRecipe = useCallback(async (item: ChatRecommendation) => {
-    if (!window.confirm(`Chọn món "${item.recipeName}" cho phiên hiện tại?`)) return;
-    await selectRecipeForCurrentSession(item.recipeId);
-    toast.success(`Đã chọn món: ${item.recipeName}`);
-    setShowRecipePicker(false);
-  }, [selectRecipeForCurrentSession]);
+  const handleAddRecipeToMeal = useCallback(
+    async (item: ChatRecommendation) => {
+      const uid = ensureUserId();
+      if (!uid) return;
+      if (state.mealItems.some((mealItem) => mealItem.recipeId === item.recipeId)) return;
+
+      const nextItems = [
+        ...state.mealItems,
+        buildMealItemFromRecommendation(item, state.mealItems.length + 1),
+      ];
+      const ok = await syncMealSelection(nextItems);
+      if (ok) {
+        setHighlightedRecipeId(item.recipeId);
+      }
+    },
+    [ensureUserId, state.mealItems, syncMealSelection],
+  );
+
+  const handleRemoveMealRecipe = useCallback(
+    async (recipeId: number) => {
+      const uid = ensureUserId();
+      if (!uid) return;
+
+      const nextItems = state.mealItems.filter((item) => item.recipeId !== recipeId);
+      await syncMealSelection(nextItems);
+    },
+    [ensureUserId, state.mealItems, syncMealSelection],
+  );
+
+  const handleMoveMealRecipe = useCallback(
+    async (recipeId: number, direction: "up" | "down") => {
+      const uid = ensureUserId();
+      if (!uid) return;
+      const nextItems = moveMealItem(state.mealItems, recipeId, direction);
+      await syncMealSelection(nextItems);
+    },
+    [ensureUserId, state.mealItems, syncMealSelection],
+  );
+
+  const handleSetPrimaryRecipe = useCallback(
+    async (recipeId: number) => {
+      const uid = ensureUserId();
+      if (!uid) return;
+      await setPrimaryRecipe(recipeId);
+    },
+    [ensureUserId, setPrimaryRecipe],
+  );
+
+  const handleChangeMealStatus = useCallback(
+    async (recipeId: number, status: MealRecipeStatus) => {
+      const uid = ensureUserId();
+      if (!uid) return;
+      await updateMealRecipeStatus({ recipeId, status });
+    },
+    [ensureUserId, updateMealRecipeStatus],
+  );
+
+  const handleOpenRecipes = useCallback(async () => {
+    const uid = ensureUserId();
+    if (!uid) return;
+    if (!state.mealItems.length) {
+      toast.error("Phiên hiện tại chưa có món nào để xem công thức");
+      return;
+    }
+
+    const missingIds = state.mealItems
+      .map((item) => item.recipeId)
+      .filter((recipeId) => !recipeCache[recipeId]);
+
+    setShowRecipeDialog(true);
+
+    if (!missingIds.length) return;
+
+    setLoadingRecipes(true);
+    try {
+      const recipes = await recipeService.getRecipesByIds(missingIds);
+      setRecipeCache((prev) => ({
+        ...prev,
+        ...buildRecipeCacheEntries(recipes),
+      }));
+    } catch {
+      toast.error("Không thể tải danh sách công thức cho phiên hiện tại");
+    } finally {
+      setLoadingRecipes(false);
+    }
+  }, [ensureUserId, recipeCache, state.mealItems]);
+
+  const handleOpenRecipeFromDialog = useCallback(
+    (recipeId: number) => {
+      setShowRecipeDialog(false);
+      router.push(`/recipe/${recipeId}`);
+    },
+    [router],
+  );
 
   const handleOpenDietModal = useCallback(async () => {
     const uid = ensureUserId();
@@ -318,52 +441,87 @@ export function useChatViewModel({
     }
   }, [dietNoteLabel, dietNoteType, upsertDietNote]);
 
-  const handleToggleDietNote = useCallback(async (note: DietNote) => {
-    const ok = await upsertDietNote({
-      noteId: note.noteId,
-      noteType: note.noteType,
-      label: note.label,
-      keywords: note.keywords && note.keywords.length ? note.keywords : [note.label],
-      isActive: note.isActive === false,
-    });
+  const handleToggleDietNote = useCallback(
+    async (note: DietNote) => {
+      const ok = await upsertDietNote({
+        noteId: note.noteId,
+        noteType: note.noteType,
+        label: note.label,
+        keywords: note.keywords && note.keywords.length ? note.keywords : [note.label],
+        isActive: note.isActive === false,
+      });
 
-    if (ok) {
-      toast.success(note.isActive === false ? "Đã bật ghi chú" : "Đã tắt ghi chú");
-    }
-  }, [upsertDietNote]);
+      if (ok) {
+        toast.success(note.isActive === false ? "Đã bật ghi chú" : "Đã tắt ghi chú");
+      }
+    },
+    [upsertDietNote],
+  );
 
-  const handleEditDietNote = useCallback(async (note: DietNote) => {
-    const nextLabel = window.prompt("Cập nhật ghi chú", note.label);
-    if (!nextLabel || !nextLabel.trim()) return;
+  const handleEditDietNote = useCallback(
+    async (note: DietNote) => {
+      const nextLabel = window.prompt("Cập nhật ghi chú", note.label);
+      if (!nextLabel || !nextLabel.trim()) return;
 
-    const normalizedLabel = nextLabel.trim();
-    const ok = await upsertDietNote({
-      noteId: note.noteId,
-      noteType: note.noteType,
-      label: normalizedLabel,
-      keywords: [normalizedLabel],
-      isActive: note.isActive !== false,
-    });
+      const normalizedLabel = nextLabel.trim();
+      const ok = await upsertDietNote({
+        noteId: note.noteId,
+        noteType: note.noteType,
+        label: normalizedLabel,
+        keywords: [normalizedLabel],
+        isActive: note.isActive !== false,
+      });
 
-    if (ok) toast.success("Đã cập nhật ghi chú");
-  }, [upsertDietNote]);
+      if (ok) toast.success("Đã cập nhật ghi chú");
+    },
+    [upsertDietNote],
+  );
 
-  const handleDeleteDietNote = useCallback(async (noteId: number) => {
-    const ok = await deleteDietNote(noteId);
-    if (ok) toast.success("Đã xóa ghi chú");
-  }, [deleteDietNote]);
+  const handleDeleteDietNote = useCallback(
+    async (noteId: number) => {
+      const ok = await deleteDietNote(noteId);
+      if (ok) toast.success("Đã xóa ghi chú");
+    },
+    [deleteDietNote],
+  );
 
-  const handleCompleteSession = useCallback(async () => {
+  const handleOpenCompleteDialog = useCallback(() => {
     const uid = ensureUserId();
     if (!uid) return;
     if (!canCompleteSession) {
-      toast.error("Cần có hội thoại thực tế trước khi hoàn thành phiên");
+      toast.error("Phiên hiện tại chưa sẵn sàng để hoàn thành");
       return;
     }
+    setShowCompleteDialog(true);
+  }, [canCompleteSession, ensureUserId]);
 
-    if (!window.confirm("Xác nhận hoàn thành phiên hiện tại?")) return;
-    await completeCurrentSession();
-  }, [canCompleteSession, completeCurrentSession, ensureUserId]);
+  const handleConfirmCompleteSession = useCallback(
+    async (payload: {
+      completionType: MealCompletionType;
+      note: string;
+      markRemainingStatus: MealRemainingStatus;
+    }) => {
+      const ok = await completeCurrentSession(payload);
+      if (ok) {
+        setShowCompleteDialog(false);
+      }
+    },
+    [completeCurrentSession],
+  );
+
+  const handleConfirmPendingPrimarySwitch = useCallback(
+    async (nextPrimaryRecipeId: number) => {
+      const ok = await confirmPendingPrimarySwitch(nextPrimaryRecipeId);
+      if (ok) {
+        toast.success("Đã cập nhật món ưu tiên tiếp theo");
+      }
+    },
+    [confirmPendingPrimarySwitch],
+  );
+
+  const handleClosePendingPrimarySwitch = useCallback(() => {
+    clearPendingPrimarySwitch();
+  }, [clearPendingPrimarySwitch]);
 
   return {
     state,
@@ -377,25 +535,45 @@ export function useChatViewModel({
     setShowRecipePicker,
     showDietModal,
     setShowDietModal,
+    showRecipeDialog,
+    setShowRecipeDialog,
+    showCompleteDialog,
+    setShowCompleteDialog,
     dietNoteLabel,
     setDietNoteLabel,
     dietNoteType,
     setDietNoteType,
     recommendationGroups,
-    activeRecommendation,
+    activeMealItem,
+    activeRecipeLabel,
     dietSummary,
     canCompleteSession,
+    canMutateMeal,
+    canSendMessage,
+    retryNow,
+    highlightedRecipeId,
+    loadingRecipes,
+    selectedRecipeEntries,
     handleTimelineScroll,
     autoScrollTimeline,
     handleSend,
-    handleOpenRecipe,
+    handleRetryMessage,
     handleOpenRecipePicker,
-    handleSelectRecipe,
+    handleAddRecipeToMeal,
+    handleRemoveMealRecipe,
+    handleMoveMealRecipe,
+    handleSetPrimaryRecipe,
+    handleChangeMealStatus,
+    handleOpenRecipes,
+    handleOpenRecipeFromDialog,
     handleOpenDietModal,
     handleAddDietNote,
     handleToggleDietNote,
     handleEditDietNote,
     handleDeleteDietNote,
-    handleCompleteSession,
+    handleOpenCompleteDialog,
+    handleConfirmCompleteSession,
+    handleConfirmPendingPrimarySwitch,
+    handleClosePendingPrimarySwitch,
   };
 }

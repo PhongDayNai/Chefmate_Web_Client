@@ -1,20 +1,23 @@
 "use client";
 
 import Link from "next/link";
+import type { MouseEventHandler } from "react";
 import { Heart, Clock, Users, Eye } from "lucide-react";
 import { API_BASE_URL } from "~/lib/apiConfig";
 
 interface RecipeProps {
   recipe: any;
+  href?: string;
+  onClick?: MouseEventHandler<HTMLAnchorElement>;
 }
 
-export default function RecipeCard({ recipe }: RecipeProps) {
+export default function RecipeCard({ recipe, href, onClick }: RecipeProps) {
   const imageUrl = recipe.image.startsWith("http")
     ? recipe.image
     : `${API_BASE_URL}${recipe.image}`;
 
   return (
-    <Link href={`/recipe/${recipe.recipeId}`} className="h-full">
+    <Link href={href || `/recipe/${recipe.recipeId}`} className="h-full" onClick={onClick}>
       <div className="group bg-white rounded-2xl overflow-hidden shadow-sm hover:shadow-xl transition-all duration-300 border border-gray-100 flex flex-col h-full">
         <div className="relative h-48 overflow-hidden">
           <img

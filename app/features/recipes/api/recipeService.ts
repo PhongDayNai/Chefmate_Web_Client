@@ -21,12 +21,25 @@ export const recipeService = {
     return response.data as TrendingV2Response;
   },
 
-  getRecipeById: async (id: number) => {
+  getAllRecipes: async () => {
     const response = await axios.get(`${BASE_URL}/all`);
     if (response.data.success) {
-      return response.data.data.find((r: any) => r.recipeId === id);
+      return Array.isArray(response.data.data) ? response.data.data : [];
     }
-    return null;
+    return [];
+  },
+
+  getRecipeById: async (id: number) => {
+    const recipes = await recipeService.getAllRecipes();
+    return recipes.find((r: any) => r.recipeId === id) || null;
+  },
+
+  getRecipesByIds: async (ids: number[]) => {
+    if (!ids.length) return [];
+    const uniqueIds = Array.from(new Set(ids));
+    const recipes = await recipeService.getAllRecipes();
+    const recipeMap = new Map(recipes.map((item: any) => [item.recipeId, item]));
+    return uniqueIds.map((id) => recipeMap.get(id)).filter(Boolean);
   },
 
   searchByTag: async (tagName: string, userId?: number) => {

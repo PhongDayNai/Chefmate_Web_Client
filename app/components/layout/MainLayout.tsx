@@ -1,7 +1,6 @@
 import Footer from "./Footer";
 import Navbar from "./Navbar";
 import AiChatBubble from "~/components/AiChatBubble";
-import PendingRecipeDialog from "~/features/chat/components/PendingRecipeDialog";
 import { ChatFlowProvider } from "~/features/chat/state/ChatFlowProvider";
 
 export default function MainLayout({ children }: { children: React.ReactNode }) {
@@ -14,7 +13,6 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
 
         <Footer />
         <AiChatBubble />
-        <PendingRecipeDialog />
       </div>
     </ChatFlowProvider>
   );

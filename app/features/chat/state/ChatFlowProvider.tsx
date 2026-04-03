@@ -12,28 +12,43 @@ import {
 import toast from "react-hot-toast";
 import { chatService } from "~/features/chat/api/chatService";
 import type {
-  ChatRecommendation,
-  DietNote,
   ChatMessage,
   ChatPaging,
+  ChatRecommendation,
   ChatSession,
   ChatUiState,
+  CompleteMealSessionPayload,
+  DietNote,
+  MealCompletionType,
+  MealItem,
+  MealRecipeStatus,
+  MealRemainingStatus,
+  MealSessionState,
+  MealSnapshot,
   PantryItem,
-  PendingPreviousRecipe,
-  ResolvePreviousPayload,
+  PendingPrimarySwitch,
 } from "~/features/chat/types";
 import { dietNoteService } from "~/features/users/api/dietNoteService";
 import { pantryService } from "~/features/pantry/api/pantryService";
+import { recipeService } from "~/features/recipes/api/recipeService";
 
-const AI_BUSY_BACKOFF_MS = [3000, 5000, 8000] as const;
-const MAX_NO_PROGRESS_ATTEMPTS = 2;
 const DEFAULT_LIMIT = 32;
+const MAX_NO_PROGRESS_ATTEMPTS = 2;
 const LAST_CHAT_SESSION_ID_KEY = "lastChatSessionId";
 const LAST_CHAT_USER_ID_KEY = "lastChatUserId";
+const MEAL_SNAPSHOT_KEY_PREFIX = "chatMealSnapshot";
+const LATEST_MEAL_SNAPSHOT_KEY_PREFIX = "chatMealLatestSession";
 
 type ChatAction =
   | { type: "MERGE"; payload: Partial<ChatUiState> }
   | { type: "RESET" };
+
+const initialMealSession: MealSessionState = {
+  chatSessionId: null,
+  activeRecipeId: null,
+  needsSelection: false,
+  uiClosed: false,
+};
 
 const initialState: ChatUiState = {
   currentSessionId: null,
@@ -48,8 +63,6 @@ const initialState: ChatUiState = {
   sending: false,
   loadingTimeline: false,
   loadingSessions: false,
-  aiBusyRetryCount: 0,
-  pendingPreviousRecipe: null,
   errorMessage: null,
   dietNotes: [],
   recommendations: [],
@@ -57,14 +70,11 @@ const initialState: ChatUiState = {
   almostReady: [],
   unavailable: [],
   pantryItems: [],
+  mealSession: initialMealSession,
+  mealItems: [],
+  pendingPrimarySwitch: null,
+  mealSyncing: false,
 };
-
-interface FetchUnifiedTimelineOptions {
-  beforeMessageId?: number;
-  createSessionIfEmpty?: boolean;
-  activeRecipeId?: number;
-  forceClearActiveRecipe?: boolean;
-}
 
 interface UpsertDietNotePayload {
   noteId?: number;
@@ -74,28 +84,41 @@ interface UpsertDietNotePayload {
   isActive?: boolean;
 }
 
+interface SendMessageOptions {
+  reuseTempId?: string;
+}
+
+interface CompleteMealOptions {
+  completionType?: MealCompletionType;
+  note?: string | null;
+  markRemainingStatus?: MealRemainingStatus;
+}
+
+interface UpdateMealStatusOptions {
+  recipeId: number;
+  status: MealRecipeStatus;
+  note?: string | null;
+}
+
 interface ChatFlowContextValue {
   state: ChatUiState;
   isLoggedIn: boolean;
   getUserId: () => number | null;
   clearChatError: () => void;
-  clearPendingPreviousRecipe: () => void;
-  newSession: () => void;
-  refreshHomeContext: () => Promise<void>;
+  clearPendingPrimarySwitch: () => void;
   refreshRecommendations: () => Promise<void>;
   refreshDietNotes: () => Promise<void>;
   upsertDietNote: (payload: UpsertDietNotePayload) => Promise<boolean>;
   deleteDietNote: (noteId: number) => Promise<boolean>;
-  loadSessions: () => Promise<void>;
-  bootstrapUnifiedTimeline: (activeRecipeId?: number) => Promise<void>;
-  openSession: (sessionId: number) => Promise<void>;
-  sendMessage: (message: string) => Promise<void>;
-  resolvePendingAction: (action: ResolvePreviousPayload["action"]) => Promise<boolean>;
-  completeCurrentSession: () => Promise<void>;
+  bootstrapUnifiedTimeline: () => Promise<void>;
   loadOlderMessages: () => Promise<void>;
-  selectRecipeForCurrentSession: (recipeId: number) => Promise<void>;
-  renameSession: (sessionId: number, title: string) => Promise<boolean>;
-  deleteSession: (sessionId: number) => Promise<boolean>;
+  sendMessage: (message: string, options?: SendMessageOptions) => Promise<void>;
+  retryMessage: (tempId: string) => Promise<void>;
+  syncMealSelection: (items: MealItem[]) => Promise<boolean>;
+  setPrimaryRecipe: (recipeId: number | null) => Promise<boolean>;
+  updateMealRecipeStatus: (payload: UpdateMealStatusOptions) => Promise<boolean>;
+  confirmPendingPrimarySwitch: (nextPrimaryRecipeId: number) => Promise<boolean>;
+  completeCurrentSession: (options?: CompleteMealOptions) => Promise<boolean>;
 }
 
 const ChatFlowContext = createContext<ChatFlowContextValue | undefined>(undefined);
@@ -117,6 +140,12 @@ function getUserIdFromStorage(): number | null {
   if (!raw) return null;
   const userId = Number(raw);
   return Number.isFinite(userId) && userId > 0 ? userId : null;
+}
+
+function toNullableNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function getPositiveNumberFromStorage(key: string): number | null {
@@ -160,14 +189,16 @@ function extractData(input: any): any {
 
 function normalizeSession(raw: any): ChatSession | null {
   if (!raw || typeof raw !== "object") return null;
-  if (!raw.chatSessionId) return null;
+  const chatSessionId = Number(raw.chatSessionId);
+  if (!Number.isFinite(chatSessionId) || chatSessionId <= 0) return null;
+
   return {
-    chatSessionId: Number(raw.chatSessionId),
+    chatSessionId,
     userId: raw.userId ? Number(raw.userId) : undefined,
-    title: raw.title || "Bepes",
-    activeRecipeId: raw.activeRecipeId ?? null,
-    createdAt: raw.createdAt,
-    updatedAt: raw.updatedAt,
+    title: typeof raw.title === "string" && raw.title.trim() ? raw.title.trim() : "Bepes",
+    activeRecipeId: toNullableNumber(raw.activeRecipeId),
+    createdAt: typeof raw.createdAt === "string" ? raw.createdAt : undefined,
+    updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : undefined,
   };
 }
 
@@ -181,17 +212,22 @@ function normalizeMessage(raw: any): ChatMessage | null {
 
   return {
     chatMessageId: raw.chatMessageId ? Number(raw.chatMessageId) : raw.messageId ? Number(raw.messageId) : undefined,
-    tempId: raw.tempId,
+    tempId: typeof raw.tempId === "string" ? raw.tempId : undefined,
     userId: raw.userId ? Number(raw.userId) : undefined,
     chatSessionId: raw.chatSessionId ? Number(raw.chatSessionId) : undefined,
-    sessionTitle: raw.sessionTitle,
-    activeRecipeId: raw.activeRecipeId ?? null,
-    isSessionStart: raw.isSessionStart,
+    sessionTitle: typeof raw.sessionTitle === "string" ? raw.sessionTitle : undefined,
+    activeRecipeId: toNullableNumber(raw.activeRecipeId),
+    isSessionStart: Boolean(raw.isSessionStart),
     role,
     content,
     meta: raw.meta ?? null,
-    createdAt: raw.createdAt || new Date().toISOString(),
+    createdAt: typeof raw.createdAt === "string" ? raw.createdAt : new Date().toISOString(),
     isPending: Boolean(raw.isPending),
+    isFailed: Boolean(raw.isFailed),
+    retryable: raw.retryable === undefined ? undefined : Boolean(raw.retryable),
+    retryAfterMs: raw.retryAfterMs !== undefined && raw.retryAfterMs !== null ? Number(raw.retryAfterMs) : undefined,
+    retryAvailableAt: typeof raw.retryAvailableAt === "string" ? raw.retryAvailableAt : null,
+    failedReason: typeof raw.failedReason === "string" ? raw.failedReason : null,
   };
 }
 
@@ -253,6 +289,25 @@ function normalizeRecommendations(raw: unknown): ChatRecommendation[] {
     .filter((item): item is ChatRecommendation => Boolean(item));
 }
 
+function normalizeTrendingRecipes(raw: unknown): ChatRecommendation[] {
+  if (!Array.isArray(raw)) return [];
+
+  return raw
+    .map((item: any) =>
+      normalizeRecommendation({
+        ...item,
+        recipeId: item?.recipeId,
+        recipeName: item?.recipeName,
+        imageUrl: item?.image,
+        ration: item?.ration,
+        cookingTime: item?.cookingTime,
+        missingIngredientsCount: undefined,
+        missingIngredients: undefined,
+      }),
+    )
+    .filter((item): item is ChatRecommendation => Boolean(item));
+}
+
 function normalizeDietNote(raw: any): DietNote | null {
   if (!raw || typeof raw !== "object") return null;
   const noteId = Number(raw.noteId ?? raw.id);
@@ -280,6 +335,102 @@ function normalizeDietNotes(raw: unknown): DietNote[] {
 function normalizePantryItems(raw: unknown): PantryItem[] {
   if (!Array.isArray(raw)) return [];
   return raw.filter((item): item is PantryItem => Boolean(item) && typeof item === "object");
+}
+
+function normalizeMealStatus(value: unknown): MealRecipeStatus {
+  return value === "cooking" || value === "done" || value === "skipped" ? value : "pending";
+}
+
+function sortMealItems(items: MealItem[]): MealItem[] {
+  return [...items]
+    .sort((a, b) => {
+      if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;
+      return a.recipeId - b.recipeId;
+    })
+    .map((item, index) => ({
+      ...item,
+      sortOrder: index + 1,
+    }));
+}
+
+function normalizeMealItem(raw: any): MealItem | null {
+  if (!raw || typeof raw !== "object") return null;
+  const recipeId = Number(raw.recipeId);
+  const recipeName =
+    typeof raw.recipeName === "string"
+      ? raw.recipeName
+      : typeof raw.recipe?.recipeName === "string"
+        ? raw.recipe.recipeName
+      : typeof raw.title === "string"
+        ? raw.title
+        : "";
+
+  if (!Number.isFinite(recipeId) || recipeId <= 0 || !recipeName.trim()) return null;
+
+  return {
+    recipeId,
+    recipeName: recipeName.trim(),
+    sortOrder: Number(raw.sortOrder ?? raw.order ?? 0) || 0,
+    status: normalizeMealStatus(raw.status),
+    servingsOverride:
+      raw.servingsOverride !== undefined && raw.servingsOverride !== null ? Number(raw.servingsOverride) : undefined,
+    note: typeof raw.note === "string" ? raw.note : null,
+  };
+}
+
+function normalizeMealItems(raw: unknown): MealItem[] {
+  if (!Array.isArray(raw)) return [];
+  return sortMealItems(
+    raw
+      .map((item) => normalizeMealItem(item))
+      .filter((item): item is MealItem => Boolean(item)),
+  );
+}
+
+function deriveNeedsSelection(items: MealItem[], activeRecipeId: number | null): boolean {
+  return items.length > 1 && !activeRecipeId;
+}
+
+function buildFocusedMessage(message: string, mealSession: MealSessionState, mealItems: MealItem[]): string {
+  if (!mealSession.activeRecipeId) return message;
+
+  const activeItem = mealItems.find((item) => item.recipeId === mealSession.activeRecipeId);
+  if (!activeItem?.recipeName?.trim()) return message;
+
+  return [
+    `Ngữ cảnh phiên nấu hiện tại: món đang được ưu tiên hiện tại là "${activeItem.recipeName}" (recipeId: ${activeItem.recipeId}).`,
+    "Nếu người dùng không chỉ rõ món khác hoặc không yêu cầu so sánh toàn bộ bữa, hãy mặc định trả lời theo món đang ưu tiên này trước.",
+    `Yêu cầu của người dùng: ${message}`,
+  ].join("\n");
+}
+
+function normalizePendingPrimarySwitch(raw: any, payload: UpdateMealStatusOptions): PendingPrimarySwitch | null {
+  if (!raw || typeof raw !== "object") return null;
+
+  const closedRecipeId = Number(raw.closedRecipeId ?? payload.recipeId);
+  if (!Number.isFinite(closedRecipeId) || closedRecipeId <= 0) return null;
+
+  const candidateNextPrimaryRecipeIds = Array.isArray(raw.candidateNextPrimaryRecipeIds)
+    ? raw.candidateNextPrimaryRecipeIds
+        .map((value: unknown) => Number(value))
+        .filter((value: number) => Number.isFinite(value) && value > 0)
+    : [];
+
+  return {
+    reason: typeof raw.reason === "string" ? raw.reason : undefined,
+    closedRecipeId,
+    closedRecipeStatus: normalizeMealStatus(raw.closedRecipeStatus ?? payload.status),
+    currentPrimaryRecipeId: toNullableNumber(raw.currentPrimaryRecipeId),
+    candidateNextPrimaryRecipeIds,
+    suggestedNextPrimaryRecipeId: toNullableNumber(raw.suggestedNextPrimaryRecipeId),
+    confirmField: typeof raw.confirmField === "string" && raw.confirmField.trim() ? raw.confirmField : "confirmSwitchPrimary",
+    chooseField: typeof raw.chooseField === "string" && raw.chooseField.trim() ? raw.chooseField : "nextPrimaryRecipeId",
+    pendingStatusPayload: {
+      recipeId: payload.recipeId,
+      status: payload.status,
+      note: payload.note ?? null,
+    },
+  };
 }
 
 function messageKey(message: ChatMessage): string {
@@ -321,36 +472,137 @@ function findPaging(payload: any, fallbackLimit: number): ChatPaging {
   return normalizePaging(data?.paging, fallbackLimit);
 }
 
-function findPendingPayload(payload: any, pendingUserMessage?: string): PendingPreviousRecipe | null {
-  const data = extractData(payload);
-  const candidate = data?.pendingPreviousRecipe ?? data?.payload ?? payload?.pendingPreviousRecipe;
-  if (!candidate || !candidate.previousSessionId) return null;
-
-  return {
-    previousSessionId: Number(candidate.previousSessionId),
-    previousSessionTitle: candidate.previousSessionTitle,
-    previousRecipeId: candidate.previousRecipeId ?? null,
-    previousRecipeName: candidate.previousRecipeName,
-    pendingUserMessage: candidate.pendingUserMessage ?? pendingUserMessage,
-  };
-}
-
-function hasPendingPreviousCode(payload: any): boolean {
-  const code = payload?.code ?? payload?.data?.code ?? payload?.errorCode ?? payload?.data?.errorCode;
-  return code === "PENDING_PREVIOUS_RECIPE_COMPLETION";
-}
-
 function hasAiBusyCode(error: any): boolean {
   return error?.response?.status === 503 && error?.response?.data?.code === "AI_SERVER_BUSY";
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function hasPendingSwitchCode(payload: any): boolean {
+  return payload?.code === "PENDING_PRIMARY_RECIPE_SWITCH_CONFIRMATION" || payload?.data?.code === "PENDING_PRIMARY_RECIPE_SWITCH_CONFIRMATION";
+}
+
+function mealSnapshotKey(userId: number, sessionId: number): string {
+  return `${MEAL_SNAPSHOT_KEY_PREFIX}:${userId}:${sessionId}`;
+}
+
+function latestMealSnapshotKey(userId: number): string {
+  return `${LATEST_MEAL_SNAPSHOT_KEY_PREFIX}:${userId}`;
+}
+
+function persistMealSnapshot(userId: number, snapshot: MealSnapshot) {
+  if (typeof window === "undefined") return;
+  const sessionId = snapshot.mealSession.chatSessionId;
+  if (!sessionId || sessionId <= 0) return;
+  localStorage.setItem(mealSnapshotKey(userId, sessionId), JSON.stringify(snapshot));
+  localStorage.setItem(latestMealSnapshotKey(userId), String(sessionId));
+}
+
+function readMealSnapshot(userId: number, sessionId: number): MealSnapshot | null {
+  if (typeof window === "undefined") return null;
+
+  try {
+    const raw = localStorage.getItem(mealSnapshotKey(userId, sessionId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    const mealItems = normalizeMealItems(parsed?.mealItems);
+    const mealSessionRaw = parsed?.mealSession ?? {};
+    const mealSession: MealSessionState = {
+      chatSessionId: Number(mealSessionRaw.chatSessionId) || sessionId,
+      activeRecipeId: toNullableNumber(mealSessionRaw.activeRecipeId),
+      needsSelection:
+        mealSessionRaw.needsSelection !== undefined
+          ? Boolean(mealSessionRaw.needsSelection)
+          : deriveNeedsSelection(mealItems, toNullableNumber(mealSessionRaw.activeRecipeId)),
+      uiClosed: Boolean(mealSessionRaw.uiClosed),
+    };
+    return { mealSession, mealItems };
+  } catch {
+    return null;
+  }
+}
+
+function readLatestMealSnapshotForUser(userId: number): MealSnapshot | null {
+  if (typeof window === "undefined") return null;
+  const sessionId = getPositiveNumberFromStorage(latestMealSnapshotKey(userId));
+  if (!sessionId) return null;
+  return readMealSnapshot(userId, sessionId);
+}
+
+function clearMealSnapshot(userId: number, sessionId: number) {
+  if (typeof window === "undefined") return;
+  localStorage.removeItem(mealSnapshotKey(userId, sessionId));
+  const latestSessionId = getPositiveNumberFromStorage(latestMealSnapshotKey(userId));
+  if (latestSessionId === sessionId) {
+    localStorage.removeItem(latestMealSnapshotKey(userId));
+  }
+}
+
+function buildMealContext(options: {
+  payload?: any;
+  userId: number | null;
+  state: ChatUiState;
+  fallbackSession?: ChatSession | null;
+  fallbackMealItems?: MealItem[];
+  fallbackActiveRecipeId?: number | null;
+  uiClosedOverride?: boolean;
+}) {
+  const data = extractData(options.payload);
+  const session = findPrimarySession(options.payload) ?? options.fallbackSession ?? null;
+  const storedSnapshot =
+    options.userId && session?.chatSessionId
+      ? readMealSnapshot(options.userId, session.chatSessionId)
+      : null;
+  const isCurrentSession = Boolean(
+    session?.chatSessionId && options.state.mealSession.chatSessionId === session.chatSessionId,
+  );
+  const payloadMealItems = Array.isArray(data?.meal?.items) ? normalizeMealItems(data.meal.items) : null;
+  const mealItems =
+    payloadMealItems ??
+    options.fallbackMealItems ??
+    (isCurrentSession ? options.state.mealItems : storedSnapshot?.mealItems ?? []);
+  const focus = data?.focus;
+  const payloadActiveRecipeId = focus?.activeRecipeId !== undefined ? toNullableNumber(focus.activeRecipeId) : undefined;
+  const activeRecipeId =
+    payloadActiveRecipeId !== undefined
+      ? payloadActiveRecipeId
+      : options.fallbackActiveRecipeId !== undefined
+        ? options.fallbackActiveRecipeId
+      : session?.activeRecipeId ?? (isCurrentSession ? options.state.mealSession.activeRecipeId : storedSnapshot?.mealSession.activeRecipeId ?? null);
+  const needsSelection =
+    focus?.needsSelection !== undefined ? Boolean(focus.needsSelection) : deriveNeedsSelection(mealItems, activeRecipeId);
+  const mealSession: MealSessionState = {
+    chatSessionId: session?.chatSessionId ?? (isCurrentSession ? options.state.mealSession.chatSessionId : storedSnapshot?.mealSession.chatSessionId ?? null),
+    activeRecipeId,
+    needsSelection,
+    uiClosed: options.uiClosedOverride ?? (isCurrentSession ? options.state.mealSession.uiClosed : storedSnapshot?.mealSession.uiClosed ?? false),
+  };
+
+  return {
+    session: session ? { ...session, activeRecipeId: mealSession.activeRecipeId } : null,
+    mealSession,
+    mealItems,
+  };
+}
+
+function buildLocalCompletionMessage(completionType: MealCompletionType): ChatMessage {
+  return {
+    tempId: `local-complete-${Date.now()}`,
+    role: "assistant",
+    content:
+      completionType === "abandoned"
+        ? "Đã đóng phiên nấu hiện tại. Khi cần, mình có thể giúp bạn bắt đầu một bữa mới."
+        : "Đã hoàn thành phiên nấu cho bữa này. Khi cần, mình có thể giúp bạn bắt đầu kế hoạch bữa mới ngay.",
+    createdAt: new Date().toISOString(),
+  };
 }
 
 export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
   const [state, dispatch] = useReducer(chatReducer, initialState);
   const stateRef = useRef(state);
+  const committedMealRef = useRef<MealSnapshot>({
+    mealSession: initialMealSession,
+    mealItems: [],
+  });
+  const mealMutationQueueRef = useRef<Promise<unknown>>(Promise.resolve());
 
   useEffect(() => {
     stateRef.current = state;
@@ -360,23 +612,7 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
     dispatch({ type: "MERGE", payload });
   }, []);
 
-  const setError = useCallback(
-    (message: string) => {
-      mergeState({ errorMessage: message });
-      toast.error(message);
-    },
-    [mergeState],
-  );
-
   const getUserId = useCallback(() => getUserIdFromStorage(), []);
-
-  const clearChatError = useCallback(() => {
-    mergeState({ errorMessage: null });
-  }, [mergeState]);
-
-  const clearPendingPreviousRecipe = useCallback(() => {
-    mergeState({ pendingPreviousRecipe: null });
-  }, [mergeState]);
 
   const persistLastSession = useCallback(
     (sessionId: number | null, userIdParam?: number | null) => {
@@ -388,6 +624,151 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
       persistStoredLastChatSession(userId, sessionId);
     },
     [getUserId],
+  );
+
+  const commitMealSnapshot = useCallback(
+    (mealSession: MealSessionState, mealItems: MealItem[], userIdParam?: number | null) => {
+      committedMealRef.current = {
+        mealSession,
+        mealItems,
+      };
+
+      const userId = userIdParam ?? getUserId();
+      if (!userId || !mealSession.chatSessionId) return;
+      persistMealSnapshot(userId, {
+        mealSession,
+        mealItems,
+      });
+    },
+    [getUserId],
+  );
+
+  const setError = useCallback(
+    (message: string) => {
+      mergeState({ errorMessage: message });
+      toast.error(message);
+    },
+    [mergeState],
+  );
+
+  const clearChatError = useCallback(() => {
+    mergeState({ errorMessage: null });
+  }, [mergeState]);
+
+  const clearPendingPrimarySwitch = useCallback(() => {
+    mergeState({ pendingPrimarySwitch: null });
+  }, [mergeState]);
+
+  const refreshRecommendations = useCallback(async () => {
+    const userId = getUserId();
+    if (!userId) return;
+
+    try {
+      const [res, trendingRes] = await Promise.all([
+        chatService.getRecommendations(userId, 12),
+        recipeService.getTrendingV2({
+          userId,
+          page: 1,
+          limit: 12,
+          period: "all",
+        }),
+      ]);
+      const data = extractData(res) || {};
+      const trendingItems = Array.isArray(trendingRes?.data?.items) ? trendingRes.data.items : [];
+      mergeState({
+        recommendations: normalizeRecommendations(data.recommendations),
+        readyToCook: normalizeRecommendations(data.readyToCook),
+        almostReady: normalizeRecommendations(data.almostReady),
+        unavailable: normalizeTrendingRecipes(trendingItems),
+      });
+    } catch {
+      setError("Không thể tải danh sách món gợi ý");
+    }
+  }, [getUserId, mergeState, setError]);
+
+  const refreshDietNotes = useCallback(async () => {
+    const userId = getUserId();
+    if (!userId) return;
+
+    try {
+      const res = await dietNoteService.getNotes(userId);
+      mergeState({ dietNotes: normalizeDietNotes(res?.data) });
+    } catch {
+      setError("Không thể tải ghi chú ăn uống");
+    }
+  }, [getUserId, mergeState, setError]);
+
+  const refreshHomeContext = useCallback(async () => {
+    const userId = getUserId();
+    if (!userId) return;
+
+    try {
+      const [dietRes, pantryRes, recommendationRes, trendingRes] = await Promise.all([
+        dietNoteService.getNotes(userId),
+        pantryService.getByUser(userId),
+        chatService.getRecommendations(userId, 12),
+        recipeService.getTrendingV2({
+          userId,
+          page: 1,
+          limit: 12,
+          period: "all",
+        }),
+      ]);
+
+      const recommendationData = extractData(recommendationRes) || {};
+      const trendingItems = Array.isArray(trendingRes?.data?.items) ? trendingRes.data.items : [];
+      mergeState({
+        dietNotes: normalizeDietNotes(dietRes?.data),
+        pantryItems: normalizePantryItems(pantryRes?.data),
+        recommendations: normalizeRecommendations(recommendationData.recommendations),
+        readyToCook: normalizeRecommendations(recommendationData.readyToCook),
+        almostReady: normalizeRecommendations(recommendationData.almostReady),
+        unavailable: normalizeTrendingRecipes(trendingItems),
+      });
+    } catch {
+      setError("Không thể đồng bộ dữ liệu nền cho chat");
+    }
+  }, [getUserId, mergeState, setError]);
+
+  const loadSessions = useCallback(async () => {
+    const userId = getUserId();
+    if (!userId) return;
+
+    mergeState({ loadingSessions: true });
+
+    try {
+      const res = await chatService.listSessions(userId, 1, 50);
+      const data = extractData(res);
+      const rawItems = Array.isArray(data?.items) ? data.items : Array.isArray(data) ? data : [];
+      const sessions = rawItems
+        .map((item: any) => normalizeSession(item))
+        .filter((item: ChatSession | null): item is ChatSession => Boolean(item));
+
+      mergeState({ sessions });
+    } catch {
+      setError("Không thể tải danh sách hội thoại");
+    } finally {
+      mergeState({ loadingSessions: false });
+    }
+  }, [getUserId, mergeState, setError]);
+
+  const hydrateMealFromSession = useCallback(
+    (session: ChatSession | null, userIdParam?: number | null) => {
+      const userId = userIdParam ?? getUserId();
+      const nextContext = buildMealContext({
+        userId,
+        state: stateRef.current,
+        fallbackSession: session,
+      });
+
+      mergeState({
+        mealSession: nextContext.mealSession,
+        mealItems: nextContext.mealItems,
+        currentSession: nextContext.session ?? stateRef.current.currentSession,
+      });
+      commitMealSnapshot(nextContext.mealSession, nextContext.mealItems, userId);
+    },
+    [commitMealSnapshot, getUserId, mergeState],
   );
 
   const tryRestoreLastSession = useCallback(async () => {
@@ -413,31 +794,21 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
         return false;
       }
 
-      // If restored session only contains assistant intro and no user interaction,
-      // treat as non-useful restore and continue fallback to older/unified history.
-      if (!timeline.some((item) => item.role === "user")) {
-        persistLastSession(null, userId);
-        return false;
-      }
-
       const restoredSession =
         normalizeSession(data?.session) ??
-        stateRef.current.sessions.find((item) => item.chatSessionId === storedSessionId) ?? {
-          chatSessionId: storedSessionId,
-          userId,
-          title: "Bepes",
-          activeRecipeId: null,
-        };
+        stateRef.current.sessions.find((item) => item.chatSessionId === storedSessionId) ??
+        null;
 
       mergeState({
-        currentSessionId: restoredSession.chatSessionId,
+        currentSessionId: restoredSession?.chatSessionId ?? storedSessionId,
         currentSession: restoredSession,
         timeline,
         hasMore: false,
         nextBeforeMessageId: null,
         noProgressLoadCount: 0,
       });
-      persistLastSession(restoredSession.chatSessionId, userId);
+      hydrateMealFromSession(restoredSession, userId);
+      persistLastSession(restoredSession?.chatSessionId ?? storedSessionId, userId);
       return true;
     } catch {
       persistLastSession(null, userId);
@@ -445,88 +816,10 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
     } finally {
       mergeState({ loadingTimeline: false });
     }
-  }, [getUserId, mergeState, persistLastSession]);
-
-  const refreshRecommendations = useCallback(async () => {
-    const userId = getUserId();
-    if (!userId) return;
-
-    try {
-      const res = await chatService.getRecommendations(userId, 10);
-      const data = extractData(res) || {};
-      mergeState({
-        recommendations: normalizeRecommendations(data.recommendations),
-        readyToCook: normalizeRecommendations(data.readyToCook),
-        almostReady: normalizeRecommendations(data.almostReady),
-        unavailable: normalizeRecommendations(data.unavailable),
-      });
-    } catch (error) {
-      setError("Không thể tải gợi ý món ăn từ tủ lạnh");
-    }
-  }, [getUserId, mergeState, setError]);
-
-  const refreshDietNotes = useCallback(async () => {
-    const userId = getUserId();
-    if (!userId) return;
-
-    try {
-      const res = await dietNoteService.getNotes(userId);
-      const notes = normalizeDietNotes(res?.data);
-      mergeState({ dietNotes: notes });
-    } catch (error) {
-      setError("Không thể tải ghi chú ăn uống");
-    }
-  }, [getUserId, mergeState, setError]);
-
-  const refreshHomeContext = useCallback(async () => {
-    const userId = getUserId();
-    if (!userId) return;
-
-    try {
-      const [dietRes, pantryRes, recommendationRes] = await Promise.all([
-        dietNoteService.getNotes(userId),
-        pantryService.getByUser(userId),
-        chatService.getRecommendations(userId, 10),
-      ]);
-
-      const recommendationData = extractData(recommendationRes) || {};
-      mergeState({
-        dietNotes: normalizeDietNotes(dietRes?.data),
-        pantryItems: normalizePantryItems(pantryRes?.data),
-        recommendations: normalizeRecommendations(recommendationData.recommendations),
-        readyToCook: normalizeRecommendations(recommendationData.readyToCook),
-        almostReady: normalizeRecommendations(recommendationData.almostReady),
-        unavailable: normalizeRecommendations(recommendationData.unavailable),
-      });
-    } catch (error) {
-      setError("Không thể đồng bộ dữ liệu nền cho chat");
-    }
-  }, [getUserId, mergeState, setError]);
-
-  const loadSessions = useCallback(async () => {
-    const userId = getUserId();
-    if (!userId) return;
-
-    mergeState({ loadingSessions: true });
-
-    try {
-      const res = await chatService.listSessions(userId, 1, 50);
-      const data = extractData(res);
-      const rawItems = Array.isArray(data?.items) ? data.items : Array.isArray(data) ? data : [];
-      const sessions = rawItems
-        .map((item: any) => normalizeSession(item))
-        .filter((item: ChatSession | null): item is ChatSession => Boolean(item));
-
-      mergeState({ sessions });
-    } catch (error) {
-      setError("Không thể tải danh sách hội thoại");
-    } finally {
-      mergeState({ loadingSessions: false });
-    }
-  }, [getUserId, mergeState, setError]);
+  }, [getUserId, hydrateMealFromSession, mergeState, persistLastSession]);
 
   const fetchUnifiedTimeline = useCallback(
-    async (options: FetchUnifiedTimelineOptions = {}) => {
+    async (beforeMessageId?: number) => {
       const userId = getUserId();
       if (!userId) return;
 
@@ -536,51 +829,24 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
       mergeState({
         loadingTimeline: true,
         errorMessage: null,
-        lastRequestedBeforeMessageId: options.beforeMessageId ?? null,
+        lastRequestedBeforeMessageId: beforeMessageId ?? null,
       });
 
       try {
         const res = await chatService.getUnifiedTimeline({
           userId,
           limit,
-          beforeMessageId: options.beforeMessageId,
+          beforeMessageId,
         });
 
         const data = extractData(res);
         const incomingMessages = normalizeMessages(data);
         const session = findPrimarySession(res);
         const paging = findPaging(res, limit);
-
-        if (!options.beforeMessageId && incomingMessages.length === 0 && !session && options.createSessionIfEmpty) {
-          const createRes = await chatService.createSession({
-            userId,
-            title: "Bepes",
-            activeRecipeId: options.activeRecipeId ?? null,
-          });
-
-          const createdSession = findPrimarySession(createRes);
-          if (createdSession) {
-            persistLastSession(createdSession.chatSessionId, userId);
-            mergeState({
-              currentSessionId: createdSession.chatSessionId,
-              currentSession: createdSession,
-            });
-            await loadSessions();
-            await fetchUnifiedTimeline({ ...options, createSessionIfEmpty: false, beforeMessageId: undefined });
-            return;
-          }
-        }
-
-        const baseTimeline = options.beforeMessageId ? current.timeline : [];
+        const baseTimeline = beforeMessageId ? current.timeline : [];
         const mergedTimeline = mergeAndSortTimeline(baseTimeline, incomingMessages);
         const hasProgress = mergedTimeline.length > baseTimeline.length;
-
-        const nextNoProgress = options.beforeMessageId
-          ? hasProgress
-            ? 0
-            : current.noProgressLoadCount + 1
-          : 0;
-
+        const nextNoProgress = beforeMessageId ? (hasProgress ? 0 : current.noProgressLoadCount + 1) : 0;
         const shouldStopPaging = nextNoProgress >= MAX_NO_PROGRESS_ATTEMPTS;
 
         const inferredSession = normalizeSession(
@@ -588,159 +854,470 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
             ? {
                 chatSessionId: data.items[data.items.length - 1].chatSessionId,
                 title: data.items[data.items.length - 1].sessionTitle,
+                activeRecipeId: data.items[data.items.length - 1].activeRecipeId,
               }
             : null,
         );
 
-        // Only keep previous currentSession when paginating older messages.
-        // For fresh loads, trust backend response and inferred timeline session.
-        const currentSession = options.beforeMessageId
+        const nextCurrentSession = beforeMessageId
           ? session ?? current.currentSession ?? inferredSession
           : session ?? inferredSession ?? null;
 
-        const finalCurrentSession =
-          currentSession && options.forceClearActiveRecipe
-            ? {
-                ...currentSession,
-                activeRecipeId: null,
-              }
-            : currentSession;
-
         mergeState({
           timeline: mergedTimeline,
-          currentSessionId: finalCurrentSession?.chatSessionId ?? (options.beforeMessageId ? current.currentSessionId : null),
-          currentSession: finalCurrentSession,
+          currentSessionId: nextCurrentSession?.chatSessionId ?? (beforeMessageId ? current.currentSessionId : null),
+          currentSession: nextCurrentSession,
           hasMore: shouldStopPaging ? false : paging.hasMore,
           nextBeforeMessageId: shouldStopPaging ? null : paging.nextBeforeMessageId,
           noProgressLoadCount: nextNoProgress,
         });
 
-        if (!options.beforeMessageId) {
-          persistLastSession(finalCurrentSession?.chatSessionId ?? null, userId);
+        if (!beforeMessageId) {
+          persistLastSession(nextCurrentSession?.chatSessionId ?? null, userId);
+          hydrateMealFromSession(nextCurrentSession, userId);
         }
-
-        if (
-          options.activeRecipeId &&
-          options.activeRecipeId > 0 &&
-          finalCurrentSession?.chatSessionId &&
-          finalCurrentSession.activeRecipeId !== options.activeRecipeId
-        ) {
-          await chatService.updateActiveRecipe({
-            userId,
-            chatSessionId: finalCurrentSession.chatSessionId,
-            recipeId: options.activeRecipeId,
-          });
-
-          mergeState({
-            currentSession: {
-              ...finalCurrentSession,
-              activeRecipeId: options.activeRecipeId,
-            },
-          });
-        }
-      } catch (error) {
+      } catch {
         setError("Không thể tải timeline hội thoại");
       } finally {
         mergeState({ loadingTimeline: false });
       }
     },
-    [getUserId, loadSessions, mergeState, persistLastSession, setError],
+    [getUserId, hydrateMealFromSession, mergeState, persistLastSession, setError],
   );
 
-  const bootstrapUnifiedTimeline = useCallback(
-    async (activeRecipeId?: number) => {
-      await refreshHomeContext();
-      const normalizedActiveRecipeId = activeRecipeId && activeRecipeId > 0 ? activeRecipeId : undefined;
+  const bootstrapUnifiedTimeline = useCallback(async () => {
+    const userId = getUserId();
+    if (!userId) return;
+
+    await refreshHomeContext();
+    await loadSessions();
+
+    const restored = await tryRestoreLastSession();
+    if (restored) return;
+
+    await fetchUnifiedTimeline();
+  }, [fetchUnifiedTimeline, getUserId, loadSessions, refreshHomeContext, tryRestoreLastSession]);
+
+  const enqueueMealMutation = useCallback(async <T,>(runner: () => Promise<T>): Promise<T> => {
+    const task = mealMutationQueueRef.current.then(runner);
+    mealMutationQueueRef.current = task.then(() => undefined, () => undefined);
+    return task;
+  }, []);
+
+  const syncMealSelection = useCallback(
+    async (items: MealItem[]) => {
       const userId = getUserId();
-      if (!userId) return;
-
-      if (normalizedActiveRecipeId) {
-        await fetchUnifiedTimeline({ createSessionIfEmpty: true, activeRecipeId: normalizedActiveRecipeId });
-        await loadSessions();
-        return;
+      if (!userId) {
+        setError("Vui lòng đăng nhập để cập nhật món cho phiên chat");
+        return false;
       }
 
-      const restored = await tryRestoreLastSession();
-      if (restored) {
-        await loadSessions();
-        return;
+      const current = stateRef.current;
+      if (current.mealSession.uiClosed) {
+        setError("Phiên nấu hiện tại đã hoàn tất và không thể chỉnh sửa");
+        return false;
       }
 
-      // Old bubble behavior parity: prefer reading existing history first.
-      await fetchUnifiedTimeline({ createSessionIfEmpty: false });
-      await loadSessions();
+      const normalizedItems = sortMealItems(items);
+      const optimisticActiveRecipeId =
+        current.mealSession.activeRecipeId && normalizedItems.some((item) => item.recipeId === current.mealSession.activeRecipeId)
+          ? current.mealSession.activeRecipeId
+          : normalizedItems.length === 1
+            ? normalizedItems[0].recipeId
+            : null;
+      const optimisticMealSession: MealSessionState = {
+        chatSessionId: current.mealSession.chatSessionId,
+        activeRecipeId: optimisticActiveRecipeId,
+        needsSelection: deriveNeedsSelection(normalizedItems, optimisticActiveRecipeId),
+        uiClosed: false,
+      };
+      const fallbackSession = current.currentSession
+        ? {
+            ...current.currentSession,
+            activeRecipeId: optimisticMealSession.activeRecipeId,
+          }
+        : null;
 
-      const hasUserMessageAfterUnified = stateRef.current.timeline.some((item) => item.role === "user");
-      if (hasUserMessageAfterUnified) return;
+      mergeState({
+        mealItems: normalizedItems,
+        mealSession: optimisticMealSession,
+        currentSession: fallbackSession,
+        pendingPrimarySwitch: null,
+      });
 
-      // If unified timeline is not enough, try the latest concrete session histories.
-      const candidates = stateRef.current.sessions.filter((session) => session.chatSessionId > 0);
-
-      for (const session of candidates) {
-        try {
-          const historyRes = await chatService.getSessionHistory(session.chatSessionId, userId);
-          const historyData = extractData(historyRes);
-          const historyTimeline = mergeAndSortTimeline([], normalizeMessages(historyData?.messages));
-          if (!historyTimeline.some((item) => item.role === "user")) continue;
-
-          const historySession = normalizeSession(historyData?.session) ?? session;
-          mergeState({
-            currentSessionId: historySession.chatSessionId,
-            currentSession: historySession,
-            timeline: historyTimeline,
-            hasMore: false,
-            nextBeforeMessageId: null,
-            noProgressLoadCount: 0,
-          });
-          persistLastSession(historySession.chatSessionId, userId);
-          return;
-        } catch {
-          // Keep searching other sessions.
-        }
-      }
-
-      // No history available at all -> preserve current create-session fallback.
-      if (stateRef.current.timeline.length === 0) {
-        await fetchUnifiedTimeline({ createSessionIfEmpty: true });
-        await loadSessions();
-      }
-    },
-    [fetchUnifiedTimeline, getUserId, loadSessions, mergeState, persistLastSession, refreshHomeContext, tryRestoreLastSession],
-  );
-
-  const openSession = useCallback(
-    async (sessionId: number) => {
-      const userId = getUserId();
-      if (!userId) return;
-
-      mergeState({ loadingTimeline: true });
+      const rollback = committedMealRef.current;
 
       try {
-        const res = await chatService.getSessionHistory(sessionId, userId);
-        const data = extractData(res);
-        const session = normalizeSession(data?.session) ?? stateRef.current.sessions.find((item) => item.chatSessionId === sessionId) ?? null;
-        const timeline = mergeAndSortTimeline([], normalizeMessages(data?.messages));
+        mergeState({ mealSyncing: true });
 
-        mergeState({
-          currentSessionId: sessionId,
-          currentSession: session,
-          timeline,
-          hasMore: false,
-          nextBeforeMessageId: null,
-          noProgressLoadCount: 0,
+        await enqueueMealMutation(async () => {
+          const latest = stateRef.current;
+          const latestSessionId = latest.mealSession.chatSessionId;
+          const latestActiveRecipeId =
+            latest.mealSession.activeRecipeId && normalizedItems.some((item) => item.recipeId === latest.mealSession.activeRecipeId)
+              ? latest.mealSession.activeRecipeId
+              : normalizedItems.length === 1
+                ? normalizedItems[0].recipeId
+                : null;
+          const latestFallbackSession = latest.currentSession
+            ? {
+                ...latest.currentSession,
+                activeRecipeId: latestActiveRecipeId,
+              }
+            : null;
+          let response: any;
+          if (!latestSessionId && normalizedItems.length > 0) {
+            response = await chatService.createMealSession({
+              userId,
+              title: latest.currentSession?.title || "Bepes",
+              recipeIds: normalizedItems.map((item) => item.recipeId),
+            });
+          } else if (latestSessionId) {
+            response = await chatService.replaceMealRecipes({
+              userId,
+              chatSessionId: latestSessionId,
+              recipes: normalizedItems.map((item) => ({
+                recipeId: item.recipeId,
+                sortOrder: item.sortOrder,
+                status: item.status,
+                note: item.note ?? null,
+                servingsOverride: item.servingsOverride ?? null,
+              })),
+            });
+          } else {
+            commitMealSnapshot(initialMealSession, [], userId);
+            return;
+          }
+
+          const nextContext = buildMealContext({
+            payload: response,
+            userId,
+            state: stateRef.current,
+            fallbackSession: latestFallbackSession ?? fallbackSession,
+            fallbackMealItems: normalizedItems,
+            fallbackActiveRecipeId: latestActiveRecipeId,
+          });
+
+          mergeState({
+            currentSessionId: nextContext.session?.chatSessionId ?? stateRef.current.currentSessionId,
+            currentSession: nextContext.session ?? stateRef.current.currentSession,
+            mealSession: nextContext.mealSession,
+            mealItems: nextContext.mealItems,
+            pendingPrimarySwitch: null,
+          });
+
+          commitMealSnapshot(nextContext.mealSession, nextContext.mealItems, userId);
+
+          if (nextContext.session?.chatSessionId) {
+            persistLastSession(nextContext.session.chatSessionId, userId);
+          }
         });
-        persistLastSession(sessionId, userId);
-      } catch (error) {
-        setError("Không thể mở hội thoại đã chọn");
+
+        return true;
+      } catch {
+        mergeState({
+          mealSession: rollback.mealSession,
+          mealItems: rollback.mealItems,
+          currentSession: stateRef.current.currentSession
+            ? {
+                ...stateRef.current.currentSession,
+                activeRecipeId: rollback.mealSession.activeRecipeId,
+              }
+            : stateRef.current.currentSession,
+        });
+        setError("Không thể cập nhật danh sách món trong phiên chat");
+        return false;
       } finally {
-        mergeState({ loadingTimeline: false });
+        mergeState({ mealSyncing: false });
       }
     },
-    [getUserId, mergeState, persistLastSession, setError],
+    [commitMealSnapshot, enqueueMealMutation, getUserId, mergeState, persistLastSession, setError],
+  );
+
+  const setPrimaryRecipe = useCallback(
+    async (recipeId: number | null) => {
+      const userId = getUserId();
+      if (!userId) {
+        setError("Vui lòng đăng nhập để chọn món ưu tiên");
+        return false;
+      }
+
+      const current = stateRef.current;
+      if (current.mealSession.uiClosed) {
+        setError("Phiên nấu hiện tại đã hoàn tất và không thể chỉnh sửa");
+        return false;
+      }
+
+      if (!current.mealItems.length) {
+        setError("Chưa có món nào trong phiên chat");
+        return false;
+      }
+
+      let sessionId = current.mealSession.chatSessionId;
+      let fallbackSession = current.currentSession;
+
+      const optimisticMealSession: MealSessionState = {
+        chatSessionId: sessionId,
+        activeRecipeId: recipeId,
+        needsSelection: deriveNeedsSelection(current.mealItems, recipeId),
+        uiClosed: false,
+      };
+      const rollback = committedMealRef.current;
+
+      mergeState({
+        mealSession: optimisticMealSession,
+        currentSession: fallbackSession
+          ? {
+              ...fallbackSession,
+              activeRecipeId: recipeId,
+            }
+          : fallbackSession,
+        pendingPrimarySwitch: null,
+      });
+
+      try {
+        mergeState({ mealSyncing: true });
+
+        await enqueueMealMutation(async () => {
+          if (!sessionId) {
+            const createRes = await chatService.createMealSession({
+              userId,
+              title: fallbackSession?.title || "Bepes",
+              recipeIds: current.mealItems.map((item) => item.recipeId),
+            });
+            const createdContext = buildMealContext({
+              payload: createRes,
+              userId,
+              state: stateRef.current,
+              fallbackSession,
+              fallbackMealItems: current.mealItems,
+              fallbackActiveRecipeId: stateRef.current.mealSession.activeRecipeId,
+            });
+            sessionId = createdContext.mealSession.chatSessionId;
+            fallbackSession = createdContext.session;
+            mergeState({
+              currentSessionId: createdContext.session?.chatSessionId ?? stateRef.current.currentSessionId,
+              currentSession: createdContext.session ?? stateRef.current.currentSession,
+              mealSession: createdContext.mealSession,
+              mealItems: createdContext.mealItems,
+            });
+            commitMealSnapshot(createdContext.mealSession, createdContext.mealItems, userId);
+          }
+
+          if (!sessionId) {
+            throw new Error("NO_MEAL_SESSION");
+          }
+
+          const response = await chatService.setPrimaryRecipe({
+            userId,
+            chatSessionId: sessionId,
+            recipeId,
+          });
+
+          const nextContext = buildMealContext({
+            payload: response,
+            userId,
+            state: stateRef.current,
+            fallbackSession,
+            fallbackMealItems: current.mealItems,
+            fallbackActiveRecipeId: recipeId,
+          });
+
+          mergeState({
+            currentSessionId: nextContext.session?.chatSessionId ?? stateRef.current.currentSessionId,
+            currentSession: nextContext.session ?? stateRef.current.currentSession,
+            mealSession: nextContext.mealSession,
+            mealItems: nextContext.mealItems,
+            pendingPrimarySwitch: null,
+          });
+
+          commitMealSnapshot(nextContext.mealSession, nextContext.mealItems, userId);
+
+          if (nextContext.session?.chatSessionId) {
+            persistLastSession(nextContext.session.chatSessionId, userId);
+          }
+        });
+
+        return true;
+      } catch {
+        mergeState({
+          mealSession: rollback.mealSession,
+          mealItems: rollback.mealItems,
+          currentSession: stateRef.current.currentSession
+            ? {
+                ...stateRef.current.currentSession,
+                activeRecipeId: rollback.mealSession.activeRecipeId,
+              }
+            : stateRef.current.currentSession,
+        });
+        setError("Không thể cập nhật món ưu tiên cho phiên chat");
+        return false;
+      } finally {
+        mergeState({ mealSyncing: false });
+      }
+    },
+    [commitMealSnapshot, enqueueMealMutation, getUserId, mergeState, persistLastSession, setError],
+  );
+
+  const updateMealRecipeStatus = useCallback(
+    async (payload: UpdateMealStatusOptions) => {
+      const userId = getUserId();
+      const current = stateRef.current;
+      const sessionId = current.mealSession.chatSessionId;
+
+      if (!userId || !sessionId) {
+        setError("Chưa có phiên nấu để cập nhật trạng thái món");
+        return false;
+      }
+
+      if (current.mealSession.uiClosed) {
+        setError("Phiên nấu hiện tại đã hoàn tất và không thể chỉnh sửa");
+        return false;
+      }
+
+      const rollback = committedMealRef.current;
+      const optimisticMealItems = sortMealItems(
+        current.mealItems.map((item) =>
+          item.recipeId === payload.recipeId
+            ? {
+                ...item,
+                status: payload.status,
+                note: payload.note ?? item.note ?? null,
+              }
+            : item,
+        ),
+      );
+
+      mergeState({
+        mealItems: optimisticMealItems,
+        pendingPrimarySwitch: null,
+      });
+
+      try {
+        mergeState({ mealSyncing: true });
+
+        const response = await enqueueMealMutation(async () =>
+          chatService.updateMealRecipeStatus({
+            userId,
+            chatSessionId: sessionId,
+            recipeId: payload.recipeId,
+            status: payload.status,
+            note: payload.note ?? null,
+          }),
+        );
+
+        if (hasPendingSwitchCode(response)) {
+          const data = extractData(response);
+          const pendingPrimarySwitch = normalizePendingPrimarySwitch(data?.pendingSwitch, payload);
+          mergeState({
+            mealSession: rollback.mealSession,
+            mealItems: rollback.mealItems,
+            currentSession: stateRef.current.currentSession
+              ? {
+                  ...stateRef.current.currentSession,
+                  activeRecipeId: rollback.mealSession.activeRecipeId,
+                }
+              : stateRef.current.currentSession,
+            pendingPrimarySwitch,
+          });
+          return Boolean(pendingPrimarySwitch);
+        }
+
+        const nextContext = buildMealContext({
+          payload: response,
+          userId,
+          state: stateRef.current,
+          fallbackSession: stateRef.current.currentSession,
+          fallbackMealItems: optimisticMealItems,
+          fallbackActiveRecipeId: stateRef.current.mealSession.activeRecipeId,
+        });
+
+        mergeState({
+          currentSessionId: nextContext.session?.chatSessionId ?? stateRef.current.currentSessionId,
+          currentSession: nextContext.session ?? stateRef.current.currentSession,
+          mealSession: nextContext.mealSession,
+          mealItems: nextContext.mealItems,
+          pendingPrimarySwitch: null,
+        });
+        commitMealSnapshot(nextContext.mealSession, nextContext.mealItems, userId);
+        return true;
+      } catch {
+        mergeState({
+          mealSession: rollback.mealSession,
+          mealItems: rollback.mealItems,
+          currentSession: stateRef.current.currentSession
+            ? {
+                ...stateRef.current.currentSession,
+                activeRecipeId: rollback.mealSession.activeRecipeId,
+              }
+            : stateRef.current.currentSession,
+        });
+        setError("Không thể cập nhật trạng thái món ăn");
+        return false;
+      } finally {
+        mergeState({ mealSyncing: false });
+      }
+    },
+    [commitMealSnapshot, enqueueMealMutation, getUserId, mergeState, setError],
+  );
+
+  const confirmPendingPrimarySwitch = useCallback(
+    async (nextPrimaryRecipeId: number) => {
+      const userId = getUserId();
+      const current = stateRef.current;
+      const sessionId = current.mealSession.chatSessionId;
+      const pending = current.pendingPrimarySwitch;
+
+      if (!userId || !sessionId || !pending) return false;
+
+      try {
+        mergeState({ mealSyncing: true });
+        const dynamicPayload: Record<string, unknown> = {
+          [pending.confirmField]: true,
+          [pending.chooseField]: nextPrimaryRecipeId,
+        };
+
+        const response = await enqueueMealMutation(async () =>
+          chatService.updateMealRecipeStatus({
+            userId,
+            chatSessionId: sessionId,
+            recipeId: pending.pendingStatusPayload.recipeId,
+            status: pending.pendingStatusPayload.status,
+            note: pending.pendingStatusPayload.note ?? null,
+            ...dynamicPayload,
+          }),
+        );
+
+        const nextContext = buildMealContext({
+          payload: response,
+          userId,
+          state: stateRef.current,
+          fallbackSession: stateRef.current.currentSession,
+          fallbackMealItems: stateRef.current.mealItems,
+          fallbackActiveRecipeId: nextPrimaryRecipeId,
+        });
+
+        mergeState({
+          currentSessionId: nextContext.session?.chatSessionId ?? stateRef.current.currentSessionId,
+          currentSession: nextContext.session ?? stateRef.current.currentSession,
+          mealSession: nextContext.mealSession,
+          mealItems: nextContext.mealItems,
+          pendingPrimarySwitch: null,
+        });
+        commitMealSnapshot(nextContext.mealSession, nextContext.mealItems, userId);
+        return true;
+      } catch {
+        setError("Không thể xác nhận món ưu tiên tiếp theo");
+        return false;
+      } finally {
+        mergeState({ mealSyncing: false });
+      }
+    },
+    [commitMealSnapshot, enqueueMealMutation, getUserId, mergeState, setError],
   );
 
   const sendMessage = useCallback(
-    async (message: string) => {
+    async (message: string, options: SendMessageOptions = {}) => {
       const userId = getUserId();
       if (!userId) {
         setError("Vui lòng đăng nhập để chat với Bepes");
@@ -750,239 +1327,269 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
       const current = stateRef.current;
       const cleanedMessage = message.trim();
       if (!cleanedMessage || current.sending) return;
+      const outboundMessage = buildFocusedMessage(cleanedMessage, current.mealSession, current.mealItems);
 
-      const optimisticTempId = `temp-${Date.now()}`;
+      if (current.mealSession.uiClosed) {
+        setError("Phiên nấu hiện tại đã hoàn tất. Hãy chọn món mới để bắt đầu tiếp.");
+        return;
+      }
+
+      const optimisticTempId = options.reuseTempId ?? `temp-${Date.now()}`;
       const optimisticMessage: ChatMessage = {
         tempId: optimisticTempId,
         role: "user",
         content: cleanedMessage,
         createdAt: new Date().toISOString(),
-        chatSessionId: current.currentSessionId ?? undefined,
+        chatSessionId: current.mealSession.chatSessionId ?? current.currentSessionId ?? undefined,
         isPending: true,
+        isFailed: false,
+        retryable: false,
+        retryAvailableAt: null,
+        failedReason: null,
       };
 
+      const nextTimeline = options.reuseTempId
+        ? current.timeline.map((item) => (item.tempId === optimisticTempId ? { ...item, ...optimisticMessage } : item))
+        : mergeAndSortTimeline(current.timeline, [optimisticMessage]);
+
       mergeState({
-        timeline: mergeAndSortTimeline(current.timeline, [optimisticMessage]),
+        timeline: nextTimeline,
         sending: true,
-        aiBusyRetryCount: 0,
         errorMessage: null,
       });
 
-      let responsePayload: any = null;
-
       try {
-        let attempt = 0;
-        while (attempt <= AI_BUSY_BACKOFF_MS.length) {
-          try {
-            responsePayload = await chatService.sendMessage({
-              userId,
-              chatSessionId: stateRef.current.currentSessionId ?? undefined,
-              message: cleanedMessage,
-            });
-            break;
-          } catch (error: any) {
-            if (hasAiBusyCode(error) && attempt < AI_BUSY_BACKOFF_MS.length) {
-              const retryCount = attempt + 1;
-              mergeState({ aiBusyRetryCount: retryCount });
-              await sleep(AI_BUSY_BACKOFF_MS[attempt]);
-              attempt += 1;
-              continue;
-            }
-
-            if (hasPendingPreviousCode(error?.response?.data)) {
-              responsePayload = error.response.data;
-              break;
-            }
-
-            throw error;
-          }
-        }
-
-        if (!responsePayload) {
-          throw new Error("EMPTY_CHAT_RESPONSE");
-        }
-
-        const pendingPayload = hasPendingPreviousCode(responsePayload)
-          ? findPendingPayload(responsePayload, cleanedMessage)
-          : null;
-
-        if (pendingPayload) {
-          const timeline = stateRef.current.timeline.map((item) =>
-            item.tempId === optimisticTempId ? { ...item, isPending: false } : item,
-          );
-
-          mergeState({
-            timeline,
-            pendingPreviousRecipe: pendingPayload,
-          });
-
-          return;
-        }
+        const responsePayload = await chatService.sendV2Message({
+          userId,
+          chatSessionId: current.mealSession.chatSessionId ?? undefined,
+          message: outboundMessage,
+          useUnifiedSession: current.mealSession.chatSessionId ? undefined : true,
+        });
 
         const responseData = extractData(responsePayload);
-        const responseSession = findPrimarySession(responsePayload);
         const responseMessages = normalizeMessages(responseData);
+        const responseSession = findPrimarySession(responsePayload) ?? stateRef.current.currentSession;
+        const assistantMessage =
+          typeof responseData?.assistantMessage === "string" && responseData.assistantMessage.trim()
+            ? normalizeMessage({
+                role: "assistant",
+                content: responseData.assistantMessage.trim(),
+                createdAt: new Date().toISOString(),
+                chatSessionId: responseSession?.chatSessionId ?? stateRef.current.currentSessionId,
+              })
+            : null;
 
-        const fallbackAssistant = responseData?.assistantMessage
-          ? normalizeMessage({
-              role: "assistant",
-              content: responseData.assistantMessage,
-              createdAt: new Date().toISOString(),
-              chatSessionId: responseSession?.chatSessionId ?? stateRef.current.currentSessionId,
-            })
-          : null;
+        const mergedResponseMessages = assistantMessage ? [...responseMessages, assistantMessage] : responseMessages;
 
-        const mergedResponseMessages = fallbackAssistant
-          ? [...responseMessages, fallbackAssistant]
-          : responseMessages;
-
-        let nextTimeline = stateRef.current.timeline.map((item) =>
-          item.tempId === optimisticTempId ? { ...item, isPending: false } : item,
+        let timeline = stateRef.current.timeline.map((item) =>
+          item.tempId === optimisticTempId
+            ? {
+                ...item,
+                isPending: false,
+                isFailed: false,
+                retryable: false,
+                retryAvailableAt: null,
+                failedReason: null,
+              }
+            : item,
         );
-        nextTimeline = mergeAndSortTimeline(nextTimeline, mergedResponseMessages);
+        timeline = mergeAndSortTimeline(timeline, mergedResponseMessages);
 
-        if (mergedResponseMessages.some((item) => item.role === "user" && item.content.trim() === cleanedMessage)) {
-          nextTimeline = nextTimeline.filter((item) => item.tempId !== optimisticTempId);
+        if (
+          mergedResponseMessages.some(
+            (item) =>
+              item.role === "user" &&
+              (item.content.trim() === cleanedMessage || item.content.trim() === outboundMessage),
+          )
+        ) {
+          timeline = timeline.filter((item) => item.tempId !== optimisticTempId);
         }
 
-        mergeState({
-          timeline: nextTimeline,
-          currentSessionId: responseSession?.chatSessionId ?? stateRef.current.currentSessionId,
-          currentSession: responseSession ?? stateRef.current.currentSession,
-          pendingPreviousRecipe: null,
-          aiBusyRetryCount: 0,
+        const nextContext = buildMealContext({
+          payload: responsePayload,
+          userId,
+          state: stateRef.current,
+          fallbackSession: responseSession,
+          fallbackMealItems: stateRef.current.mealItems,
+          fallbackActiveRecipeId: responseSession?.activeRecipeId ?? stateRef.current.mealSession.activeRecipeId,
         });
 
-        const nextSessionId = responseSession?.chatSessionId ?? stateRef.current.currentSessionId;
-        if (nextSessionId) {
-          persistLastSession(nextSessionId, userId);
-        }
+        mergeState({
+          timeline,
+          currentSessionId: nextContext.session?.chatSessionId ?? stateRef.current.currentSessionId,
+          currentSession: nextContext.session ?? stateRef.current.currentSession,
+          mealSession: nextContext.mealSession,
+          mealItems: nextContext.mealItems,
+          pendingPrimarySwitch: null,
+        });
+        commitMealSnapshot(nextContext.mealSession, nextContext.mealItems, userId);
 
-        const paging = responseData?.paging ? normalizePaging(responseData.paging, stateRef.current.limit) : null;
-        if (paging) {
-          mergeState({
-            hasMore: paging.hasMore,
-            nextBeforeMessageId: paging.nextBeforeMessageId,
-          });
+        if (nextContext.session?.chatSessionId) {
+          persistLastSession(nextContext.session.chatSessionId, userId);
         }
-
-        await loadSessions();
       } catch (error: any) {
-        const timeline = stateRef.current.timeline.map((item) =>
-          item.tempId === optimisticTempId ? { ...item, isPending: false } : item,
-        );
-        mergeState({ timeline });
-        setError(error?.response?.data?.message || "AI đang bận, thử lại sau nhé!");
+        if (hasAiBusyCode(error)) {
+          const body = error?.response?.data;
+          const data = extractData(body);
+          const retryAfterMs = Math.max(Number(data?.retryAfterMs ?? 5000), 0);
+          const retryable = data?.retryable === true;
+          const failureMessage =
+            data?.error?.message || body?.message || "AI đang bận, vui lòng thử lại sau ít phút";
+          const failedContent = cleanedMessage;
+
+          mergeState({
+            timeline: stateRef.current.timeline.map((item) =>
+              item.tempId === optimisticTempId
+                ? {
+                    ...item,
+                    content: failedContent,
+                    isPending: false,
+                    isFailed: true,
+                    retryable,
+                    retryAfterMs,
+                    retryAvailableAt: new Date(Date.now() + retryAfterMs).toISOString(),
+                    failedReason: failureMessage,
+                  }
+                : item,
+            ),
+          });
+          toast.error(failureMessage);
+        } else {
+          const failureMessage = error?.response?.data?.message || "Không thể gửi tin nhắn cho Bepes";
+          mergeState({
+            timeline: stateRef.current.timeline.map((item) =>
+              item.tempId === optimisticTempId
+                ? {
+                    ...item,
+                    isPending: false,
+                    isFailed: true,
+                    retryable: false,
+                    retryAvailableAt: null,
+                    failedReason: failureMessage,
+                  }
+                : item,
+            ),
+          });
+          setError(failureMessage);
+        }
       } finally {
         mergeState({ sending: false });
       }
     },
-    [getUserId, loadSessions, mergeState, persistLastSession, setError],
+    [commitMealSnapshot, getUserId, mergeState, persistLastSession, setError],
   );
 
-  const resolvePendingAction = useCallback(
-    async (action: ResolvePreviousPayload["action"]) => {
+  const retryMessage = useCallback(
+    async (tempId: string) => {
+      const message = stateRef.current.timeline.find((item) => item.tempId === tempId);
+      if (!message || !message.isFailed || !message.retryable) return;
+
+      const retryAvailableAt = message.retryAvailableAt ? new Date(message.retryAvailableAt).getTime() : 0;
+      const waitMs = retryAvailableAt - Date.now();
+      if (waitMs > 0) {
+        toast.error(`Vui lòng chờ ${Math.ceil(waitMs / 1000)} giây để gửi lại`);
+        return;
+      }
+
+      await sendMessage(message.content, { reuseTempId: tempId });
+    },
+    [sendMessage],
+  );
+
+  const completeCurrentSession = useCallback(
+    async (options: CompleteMealOptions = {}) => {
       const userId = getUserId();
-      const pending = stateRef.current.pendingPreviousRecipe;
+      const current = stateRef.current;
+      const chatSessionId = current.mealSession.chatSessionId;
 
-      if (!userId || !pending) return false;
+      if (!userId || !chatSessionId) {
+        setError("Chưa có phiên nấu để hoàn thành");
+        return false;
+      }
 
-      mergeState({ sending: true });
+      if (current.mealSession.uiClosed) {
+        return true;
+      }
 
       try {
-        const payload: ResolvePreviousPayload = {
+        mergeState({ mealSyncing: true });
+
+        const payload: CompleteMealSessionPayload = {
           userId,
-          previousSessionId: pending.previousSessionId,
-          action,
-          pendingUserMessage: pending.pendingUserMessage ?? null,
+          chatSessionId,
+          completionType: options.completionType ?? "completed",
+          note: options.note ?? null,
+          markRemainingStatus: options.markRemainingStatus ?? (options.completionType === "abandoned" ? "skipped" : "done"),
         };
 
-        const res = await chatService.resolveAndCreate(payload);
-        const data = extractData(res);
-        const session = findPrimarySession(res);
-        const messages = normalizeMessages(data);
-
-        mergeState({
-          timeline: mergeAndSortTimeline([], messages),
-          currentSessionId: session?.chatSessionId ?? stateRef.current.currentSessionId,
-          currentSession: session ?? stateRef.current.currentSession,
-          pendingPreviousRecipe: null,
+        const response = await enqueueMealMutation(async () => chatService.completeMealSession(payload));
+        const responseData = extractData(response);
+        const responseMessages = normalizeMessages(responseData);
+        const responseSession = findPrimarySession(response) ?? stateRef.current.currentSession;
+        const assistantMessage =
+          typeof responseData?.assistantMessage === "string" && responseData.assistantMessage.trim()
+            ? normalizeMessage({
+                role: "assistant",
+                content: responseData.assistantMessage.trim(),
+                createdAt: new Date().toISOString(),
+                chatSessionId: responseSession?.chatSessionId ?? stateRef.current.currentSessionId,
+              })
+            : null;
+        const mergedCompletionMessages = assistantMessage ? [...responseMessages, assistantMessage] : responseMessages;
+        const nextContext = buildMealContext({
+          payload: response,
+          userId,
+          state: stateRef.current,
+          fallbackSession: stateRef.current.currentSession,
+          fallbackMealItems: stateRef.current.mealItems,
+          fallbackActiveRecipeId: null,
+          uiClosedOverride: true,
         });
 
-        await fetchUnifiedTimeline({ createSessionIfEmpty: action !== "continue_current_session" });
-        await loadSessions();
+        const hasAssistantResponse =
+          mergedCompletionMessages.some((item) => item.role === "assistant") ||
+          (typeof responseData?.assistantMessage === "string" && responseData.assistantMessage.trim());
+        const timeline = hasAssistantResponse
+          ? mergeAndSortTimeline(stateRef.current.timeline, mergedCompletionMessages)
+          : mergeAndSortTimeline(stateRef.current.timeline, [buildLocalCompletionMessage(payload.completionType || "completed")]);
 
-        persistLastSession(stateRef.current.currentSessionId, userId);
-
+        mergeState({
+          timeline,
+          currentSessionId: nextContext.session?.chatSessionId ?? stateRef.current.currentSessionId,
+          currentSession: nextContext.session
+            ? {
+                ...nextContext.session,
+                activeRecipeId: null,
+              }
+            : stateRef.current.currentSession,
+          mealSession: {
+            ...nextContext.mealSession,
+            activeRecipeId: null,
+            uiClosed: true,
+          },
+          mealItems: nextContext.mealItems,
+          pendingPrimarySwitch: null,
+        });
+        commitMealSnapshot(
+          {
+            ...nextContext.mealSession,
+            activeRecipeId: null,
+            uiClosed: true,
+          },
+          nextContext.mealItems,
+          userId,
+        );
+        toast.success("Đã hoàn tất phiên nấu ăn");
         return true;
-      } catch (error) {
-        setError("Không thể xử lý phiên trước đó");
+      } catch {
+        setError("Không thể hoàn thành phiên hiện tại");
         return false;
       } finally {
-        mergeState({ sending: false });
+        mergeState({ mealSyncing: false });
       }
     },
-    [fetchUnifiedTimeline, getUserId, loadSessions, mergeState, persistLastSession, setError],
+    [commitMealSnapshot, enqueueMealMutation, getUserId, mergeState, setError],
   );
-
-  const completeCurrentSession = useCallback(async () => {
-    const userId = getUserId();
-    const currentSessionId = stateRef.current.currentSessionId;
-
-    if (!userId || !currentSessionId) return;
-
-    try {
-      await chatService.resolveAndCreate({
-        userId,
-        previousSessionId: currentSessionId,
-        action: "complete_and_deduct",
-        pendingUserMessage: null,
-      });
-
-      // Clear selected recipe right away so UI does not keep stale context
-      // while timeline/session are being refreshed.
-      mergeState({
-        currentSession: stateRef.current.currentSession
-          ? {
-              ...stateRef.current.currentSession,
-              activeRecipeId: null,
-            }
-          : null,
-      });
-
-      await fetchUnifiedTimeline({ createSessionIfEmpty: true, forceClearActiveRecipe: true });
-      await loadSessions();
-
-      // Backend may carry active recipe into the next session after resolve.
-      // Always clear active recipe on the latest session id server-side,
-      // do not rely on local state because forceClearActiveRecipe already nulls it.
-      const latestSession = stateRef.current.currentSession;
-      if (latestSession?.chatSessionId) {
-        try {
-          await chatService.updateActiveRecipe({
-            userId,
-            chatSessionId: latestSession.chatSessionId,
-            recipeId: null,
-          });
-        } catch (error) {
-          // Silent fallback: keep UI consistent even if backend patch fails.
-        }
-
-        mergeState({
-          currentSession: {
-            ...latestSession,
-            activeRecipeId: null,
-          },
-        });
-      }
-
-      persistLastSession(stateRef.current.currentSessionId, userId);
-
-      toast.success("Đã hoàn thành phiên nấu ăn");
-    } catch (error) {
-      setError("Không thể hoàn thành phiên hiện tại");
-    }
-  }, [fetchUnifiedTimeline, getUserId, loadSessions, mergeState, persistLastSession, setError]);
 
   const loadOlderMessages = useCallback(async () => {
     const current = stateRef.current;
@@ -996,127 +1603,8 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    await fetchUnifiedTimeline({ beforeMessageId: current.nextBeforeMessageId });
+    await fetchUnifiedTimeline(current.nextBeforeMessageId);
   }, [fetchUnifiedTimeline]);
-
-  const selectRecipeForCurrentSession = useCallback(
-    async (recipeId: number) => {
-      const userId = getUserId();
-      if (!userId) return;
-
-      try {
-        const current = stateRef.current;
-        if (!current.currentSessionId) {
-          const res = await chatService.createSession({
-            userId,
-            title: "Bepes",
-            activeRecipeId: recipeId,
-          });
-
-          const session = findPrimarySession(res);
-          if (session) {
-            persistLastSession(session.chatSessionId, userId);
-            mergeState({
-              currentSessionId: session.chatSessionId,
-              currentSession: session,
-            });
-          }
-
-          await fetchUnifiedTimeline({ createSessionIfEmpty: false, activeRecipeId: recipeId });
-          await loadSessions();
-          return;
-        }
-
-        await chatService.updateActiveRecipe({
-          userId,
-          chatSessionId: current.currentSessionId,
-          recipeId,
-        });
-
-        if (current.currentSession) {
-          mergeState({
-            currentSession: {
-              ...current.currentSession,
-              activeRecipeId: recipeId,
-            },
-          });
-        }
-
-        persistLastSession(current.currentSessionId, userId);
-
-        toast.success("Đã cập nhật món đang nấu cho phiên chat");
-      } catch (error) {
-        setError("Không thể gắn món ăn vào phiên hiện tại");
-      }
-    },
-    [fetchUnifiedTimeline, getUserId, loadSessions, mergeState, persistLastSession, setError],
-  );
-
-  const renameSession = useCallback(
-    async (sessionId: number, title: string) => {
-      const userId = getUserId();
-      if (!userId) return false;
-
-      const cleanedTitle = title.trim();
-      if (!cleanedTitle) return false;
-
-      try {
-        await chatService.updateTitle({ userId, chatSessionId: sessionId, title: cleanedTitle });
-
-        const sessions = stateRef.current.sessions.map((item) =>
-          item.chatSessionId === sessionId ? { ...item, title: cleanedTitle } : item,
-        );
-
-        const currentSession =
-          stateRef.current.currentSession?.chatSessionId === sessionId
-            ? { ...stateRef.current.currentSession, title: cleanedTitle }
-            : stateRef.current.currentSession;
-
-        mergeState({ sessions, currentSession });
-        return true;
-      } catch (error) {
-        setError("Không thể đổi tên hội thoại");
-        return false;
-      }
-    },
-    [getUserId, mergeState, setError],
-  );
-
-  const deleteSession = useCallback(
-    async (sessionId: number) => {
-      const userId = getUserId();
-      if (!userId) return false;
-      const storedSessionId = getStoredLastChatSessionForUser(userId);
-
-      try {
-        await chatService.deleteSession(sessionId, userId);
-
-        const sessions = stateRef.current.sessions.filter((item) => item.chatSessionId !== sessionId);
-        const isCurrentDeleted = stateRef.current.currentSessionId === sessionId;
-
-        mergeState({
-          sessions,
-          currentSessionId: isCurrentDeleted ? null : stateRef.current.currentSessionId,
-          currentSession: isCurrentDeleted ? null : stateRef.current.currentSession,
-          timeline: isCurrentDeleted ? [] : stateRef.current.timeline,
-        });
-
-        if (isCurrentDeleted) {
-          await fetchUnifiedTimeline({ createSessionIfEmpty: true });
-        }
-
-        if (storedSessionId === sessionId || isCurrentDeleted) {
-          persistLastSession(stateRef.current.currentSessionId, userId);
-        }
-
-        return true;
-      } catch (error) {
-        setError("Không thể xóa hội thoại");
-        return false;
-      }
-    },
-    [fetchUnifiedTimeline, getUserId, mergeState, persistLastSession, setError],
-  );
 
   const upsertDietNote = useCallback(
     async (payload: UpsertDietNotePayload) => {
@@ -1131,7 +1619,7 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
         await refreshDietNotes();
         await refreshRecommendations();
         return true;
-      } catch (error) {
+      } catch {
         setError("Không thể cập nhật ghi chú ăn uống");
         return false;
       }
@@ -1151,7 +1639,7 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
         await refreshDietNotes();
         await refreshRecommendations();
         return true;
-      } catch (error) {
+      } catch {
         setError("Không thể xóa ghi chú ăn uống");
         return false;
       }
@@ -1159,19 +1647,28 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
     [getUserId, refreshDietNotes, refreshRecommendations, setError],
   );
 
-  const newSession = useCallback(() => {
+  useEffect(() => {
     const userId = getUserId();
+    if (!userId) return;
+
+    const currentSessionId = state.currentSession?.chatSessionId;
+    if (!currentSessionId || state.mealSession.chatSessionId === currentSessionId) return;
+
+    const snapshot = readMealSnapshot(userId, currentSessionId);
+    if (!snapshot) return;
+
     mergeState({
-      currentSessionId: null,
-      currentSession: null,
-      timeline: [],
-      hasMore: true,
-      nextBeforeMessageId: null,
-      noProgressLoadCount: 0,
-      pendingPreviousRecipe: null,
+      mealSession: snapshot.mealSession,
+      mealItems: snapshot.mealItems,
+      currentSession: state.currentSession
+        ? {
+            ...state.currentSession,
+            activeRecipeId: snapshot.mealSession.activeRecipeId,
+          }
+        : state.currentSession,
     });
-    persistLastSession(null, userId);
-  }, [getUserId, mergeState, persistLastSession]);
+    commitMealSnapshot(snapshot.mealSession, snapshot.mealItems, userId);
+  }, [commitMealSnapshot, getUserId, mergeState, state.currentSession, state.mealSession.chatSessionId]);
 
   const value: ChatFlowContextValue = useMemo(
     () => ({
@@ -1179,45 +1676,39 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
       isLoggedIn: Boolean(getUserIdFromStorage()),
       getUserId,
       clearChatError,
-      clearPendingPreviousRecipe,
-      newSession,
-      refreshHomeContext,
+      clearPendingPrimarySwitch,
       refreshRecommendations,
       refreshDietNotes,
       upsertDietNote,
       deleteDietNote,
-      loadSessions,
       bootstrapUnifiedTimeline,
-      openSession,
-      sendMessage,
-      resolvePendingAction,
-      completeCurrentSession,
       loadOlderMessages,
-      selectRecipeForCurrentSession,
-      renameSession,
-      deleteSession,
+      sendMessage,
+      retryMessage,
+      syncMealSelection,
+      setPrimaryRecipe,
+      updateMealRecipeStatus,
+      confirmPendingPrimarySwitch,
+      completeCurrentSession,
     }),
     [
       state,
       getUserId,
       clearChatError,
-      clearPendingPreviousRecipe,
-      newSession,
-      refreshHomeContext,
+      clearPendingPrimarySwitch,
       refreshRecommendations,
       refreshDietNotes,
       upsertDietNote,
       deleteDietNote,
-      loadSessions,
       bootstrapUnifiedTimeline,
-      openSession,
-      sendMessage,
-      resolvePendingAction,
-      completeCurrentSession,
       loadOlderMessages,
-      selectRecipeForCurrentSession,
-      renameSession,
-      deleteSession,
+      sendMessage,
+      retryMessage,
+      syncMealSelection,
+      setPrimaryRecipe,
+      updateMealRecipeStatus,
+      confirmPendingPrimarySwitch,
+      completeCurrentSession,
     ],
   );
 
