@@ -1400,19 +1400,39 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
           fallbackMealItems: stateRef.current.mealItems,
           fallbackActiveRecipeId: responseSession?.activeRecipeId ?? stateRef.current.mealSession.activeRecipeId,
         });
+        const previousActiveRecipeId = stateRef.current.mealSession.activeRecipeId;
+        const shouldPreserveActiveRecipe =
+          previousActiveRecipeId &&
+          !nextContext.mealSession.activeRecipeId &&
+          nextContext.mealItems.some((item) => item.recipeId === previousActiveRecipeId);
+        const resolvedMealSession = shouldPreserveActiveRecipe
+          ? {
+              ...nextContext.mealSession,
+              activeRecipeId: previousActiveRecipeId,
+              needsSelection: deriveNeedsSelection(nextContext.mealItems, previousActiveRecipeId),
+            }
+          : nextContext.mealSession;
+        const resolvedSession = shouldPreserveActiveRecipe
+          ? nextContext.session
+            ? {
+                ...nextContext.session,
+                activeRecipeId: previousActiveRecipeId,
+              }
+            : nextContext.session
+          : nextContext.session;
 
         mergeState({
           timeline,
-          currentSessionId: nextContext.session?.chatSessionId ?? stateRef.current.currentSessionId,
-          currentSession: nextContext.session ?? stateRef.current.currentSession,
-          mealSession: nextContext.mealSession,
+          currentSessionId: resolvedSession?.chatSessionId ?? stateRef.current.currentSessionId,
+          currentSession: resolvedSession ?? stateRef.current.currentSession,
+          mealSession: resolvedMealSession,
           mealItems: nextContext.mealItems,
           pendingPrimarySwitch: null,
         });
-        commitMealSnapshot(nextContext.mealSession, nextContext.mealItems, userId);
+        commitMealSnapshot(resolvedMealSession, nextContext.mealItems, userId);
 
-        if (nextContext.session?.chatSessionId) {
-          persistLastSession(nextContext.session.chatSessionId, userId);
+        if (resolvedSession?.chatSessionId) {
+          persistLastSession(resolvedSession.chatSessionId, userId);
         }
       } catch (error: any) {
         if (hasAiBusyCode(error)) {
