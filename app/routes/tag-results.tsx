@@ -17,9 +17,6 @@ export default function TagResultsPage() {
 
   useEffect(() => {
     const fetchRecipes = async () => {
-      const rawUserId = localStorage.getItem("userId");
-      const parsedUserId = rawUserId ? Number(rawUserId) : NaN;
-      const userId = Number.isFinite(parsedUserId) && parsedUserId > 0 ? parsedUserId : undefined;
       if (!tagName) {
         setRecipes([]);
         setLoading(false);
@@ -28,7 +25,7 @@ export default function TagResultsPage() {
 
       setLoading(true);
       try {
-        const res = await recipeService.searchByTag(tagName, userId);
+        const res = await recipeService.searchByTag(tagName);
         if (res.success) setRecipes(res.data);
       } finally {
         setLoading(false);

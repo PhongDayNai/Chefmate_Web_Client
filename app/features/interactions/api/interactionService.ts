@@ -1,25 +1,25 @@
-import axios from "axios";
+import axios from "~/lib/apiClient";
 import { checkAuth } from "~/utils/authUtils";
 import { buildApiUrl } from "~/lib/apiConfig";
 
-const BASE_URL = buildApiUrl("/api/interactions");
+const BASE_URL = buildApiUrl("/v2/interactions");
 
 export const interactionService = {
-  likeRecipe: async (userId: number, recipeId: number) => {
+  likeRecipe: async (recipeId: number) => {
     if (!checkAuth()) {
       throw new Error("AUTH_REQUIRED");
     }
 
-    const res = await axios.post(`${BASE_URL}/like`, { userId, recipeId });
+    const res = await axios.post(`${BASE_URL}/like`, { recipeId });
     return res.data;
   },
 
-  createComment: async (userId: number, recipeId: number, content: string) => {
+  createComment: async (recipeId: number, content: string) => {
     if (!checkAuth()) {
       throw new Error("AUTH_REQUIRED");
     }
 
-    const res = await axios.post(`${BASE_URL}/comment`, { userId, recipeId, content });
+    const res = await axios.post(`${BASE_URL}/comment`, { recipeId, content });
     return res.data;
   },
 

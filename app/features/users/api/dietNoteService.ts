@@ -1,12 +1,12 @@
-import axios from "axios";
+import axios from "~/lib/apiClient";
 import { checkAuth } from "~/utils/authUtils";
 import { buildApiUrl } from "~/lib/apiConfig";
 
-const BASE_URL = buildApiUrl("/api/user-diet-notes");
+const BASE_URL = buildApiUrl("/v2/user-diet-notes");
 
 export const dietNoteService = {
-  getNotes: async (userId: number) => {
-    const res = await axios.get(`${BASE_URL}?userId=${userId}`);
+  getNotes: async () => {
+    const res = await axios.get(BASE_URL);
     return res.data;
   },
 
@@ -19,12 +19,12 @@ export const dietNoteService = {
     return res.data;
   },
 
-  deleteNote: async (userId: number, noteId: number) => {
+  deleteNote: async (noteId: number) => {
     if (!checkAuth()) {
       throw new Error("AUTH_REQUIRED");
     }
 
-    const res = await axios.delete(`${BASE_URL}/delete`, { data: { userId, noteId } });
+    const res = await axios.delete(`${BASE_URL}/delete`, { data: { noteId } });
     return res.data;
   },
 };

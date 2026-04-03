@@ -15,7 +15,7 @@ import type {
 import { useChatFlow } from "~/features/chat/state/ChatFlowProvider";
 import { recipeService } from "~/features/recipes/api/recipeService";
 import type { MealPickerGroup } from "~/features/chat/components/MealPickerDialog";
-
+import { checkAuth, getAuthUserId } from "~/utils/authUtils";
 export const CHAT_SCROLL_TOP_LOAD_THRESHOLD = 80;
 export const CHAT_SCROLL_BOTTOM_THRESHOLD = 120;
 
@@ -25,13 +25,6 @@ interface UseChatViewModelOptions {
   bootstrapWhen?: boolean;
   onRecipeParamConsumed?: () => void;
   syncContextActionsWhen?: boolean;
-}
-
-function readUserIdFromStorage(): number | null {
-  if (typeof window === "undefined") return null;
-  const rawUserId = localStorage.getItem("userId");
-  const parsedUserId = Number(rawUserId);
-  return Number.isFinite(parsedUserId) && parsedUserId > 0 ? parsedUserId : null;
 }
 
 export const DIET_NOTE_TYPE_OPTIONS: { value: DietNoteType; label: string }[] = [
@@ -127,14 +120,14 @@ export function useChatViewModel({
   const autoOpenedNeedSelectionRef = useRef<string | null>(null);
 
   useEffect(() => {
-    setResolvedUserId(readUserIdFromStorage());
-    const onStorage = () => setResolvedUserId(readUserIdFromStorage());
+    setResolvedUserId(getAuthUserId());
+    const onStorage = () => setResolvedUserId(getAuthUserId());
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
   }, []);
 
   const userId = resolvedUserId;
-  const isLoggedIn = Boolean(resolvedUserId);
+  const isLoggedIn = checkAuth();
 
   const recommendationGroups = useMemo<MealPickerGroup[]>(
     () => [
@@ -203,7 +196,7 @@ export function useChatViewModel({
   }, [state.timeline]);
 
   useEffect(() => {
-    const latestUserId = readUserIdFromStorage();
+    const latestUserId = getAuthUserId();
     if (latestUserId !== resolvedUserId) {
       setResolvedUserId(latestUserId);
     }
@@ -268,7 +261,7 @@ export function useChatViewModel({
 
   const ensureUserId = useCallback(() => {
     if (!ensureAuth()) return null;
-    const uid = readUserIdFromStorage() ?? getUserId();
+    const uid = getAuthUserId() ?? getUserId();
     if (!uid) return null;
     setResolvedUserId(uid);
     return uid;

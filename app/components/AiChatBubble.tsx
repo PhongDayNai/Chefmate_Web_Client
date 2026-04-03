@@ -13,6 +13,7 @@ import CompleteMealDialog from "~/features/chat/components/CompleteMealDialog";
 import MealPickerDialog from "~/features/chat/components/MealPickerDialog";
 import PendingPrimarySwitchDialog from "~/features/chat/components/PendingPrimarySwitchDialog";
 import SelectedRecipesDialog from "~/features/chat/components/SelectedRecipesDialog";
+import { checkAuth, getAuthUser } from "~/utils/authUtils";
 
 const BUBBLE_ANIMATION_MS = 260;
 
@@ -26,19 +27,17 @@ export default function AiChatBubble() {
   const timelineRef = useRef<HTMLDivElement>(null);
 
   const ensureLoggedIn = () => {
-    const rawUserId = localStorage.getItem("userId");
-    const parsedUserId = Number(rawUserId);
-    const nextUserId = Number.isFinite(parsedUserId) && parsedUserId > 0 ? parsedUserId : null;
+    const nextUser = getAuthUser();
 
-    setUserName(localStorage.getItem("userName"));
+    setUserName(nextUser?.fullName || null);
 
-    if (!nextUserId) {
+    if (!checkAuth()) {
       toast.error("Vui lòng đăng nhập để chat với Bepes!");
       router.push("/auth");
       return null;
     }
 
-    return nextUserId;
+    return nextUser?.userId ?? null;
   };
 
   const {
@@ -97,7 +96,7 @@ export default function AiChatBubble() {
   });
 
   useEffect(() => {
-    setUserName(localStorage.getItem("userName"));
+    setUserName(getAuthUser()?.fullName || null);
   }, []);
 
   useEffect(() => {

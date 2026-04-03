@@ -1,11 +1,11 @@
-export interface AuthResponse {
+import type { AuthSessionPayload, AuthUser } from "~/utils/authUtils";
+
+export type { AuthSessionPayload, AuthUser };
+
+export interface ApiResponse<T = unknown> {
   success: boolean;
   message: string;
-  data: {
-    userId: number;
-    fullName: string;
-    phone: string;
-    email: string;
-    createdAt: string;
-  };
+  data: T;
 }
+
+export type AuthResponse = ApiResponse<AuthSessionPayload>;

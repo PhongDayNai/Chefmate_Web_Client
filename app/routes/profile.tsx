@@ -19,6 +19,7 @@ import {
   Mail
 } from "lucide-react";
 import toast from "react-hot-toast";
+import { getAuthUser, updateStoredAuthUser } from "~/utils/authUtils";
 
 export default function ProfilePage() {
   const { requireAuth } = useAuthGuard();
@@ -30,17 +31,13 @@ export default function ProfilePage() {
   const [pass, setPass] = useState({ current: "", new: "" });
   const [newNote, setNewNote] = useState({ label: "", noteType: "allergy" });
 
-  const userId = typeof window !== "undefined" ? localStorage.getItem("userId") : null;
-
   const loadAllData = async () => {
-    if (!userId) return;
-    const uId = parseInt(userId);
+    if (!getAuthUser()) return;
 
-    // Load song song các dữ liệu
     const [historyRes, myRecipesRes, dietRes] = await Promise.all([
-      userService.getViewHistory(uId),
-      recipeService.getUserRecipes(uId),
-      dietNoteService.getNotes(uId)
+      userService.getViewHistory(),
+      recipeService.getUserRecipes(),
+      dietNoteService.getNotes()
     ]);
 
     if (historyRes.success) setHistory(historyRes.data);
@@ -50,13 +47,12 @@ export default function ProfilePage() {
 
   useEffect(() => {
     loadAllData();
-    
-    // SỬA LỖI TẠI ĐÂY: Lấy đúng dữ liệu từ localStorage đã lưu khi Login
-    // Đảm bảo các key này khớp với logic lưu trữ lúc Login của bạn
+
+    const authUser = getAuthUser();
     setUser({
-      fullName: localStorage.getItem("userName") || "",
-      email: localStorage.getItem("userEmail") || "", 
-      phone: localStorage.getItem("userPhone") || ""
+      fullName: authUser?.fullName || "",
+      email: authUser?.email || "",
+      phone: authUser?.phone || "",
     });
   }, []);
 
@@ -65,20 +61,27 @@ export default function ProfilePage() {
 
     if (!requireAuth()) return;
 
-    if (!userId) return;
-
     const res = await userService.updateInfo({
-      userId: parseInt(userId),
       fullName: user.fullName,
       email: user.email,
       phone: user.phone
     });
 
     if (res.success) {
-      // Cập nhật lại localStorage để đồng bộ toàn app
-      localStorage.setItem("userName", res.data.fullName);
-      localStorage.setItem("userPhone", res.data.phone);
-      localStorage.setItem("userEmail", res.data.email);
+      const updatedUser = {
+        ...getAuthUser(),
+        ...(res.data?.user || res.data || {}),
+        fullName: res.data?.user?.fullName || res.data?.fullName || user.fullName,
+        phone: res.data?.user?.phone || res.data?.phone || user.phone,
+        email: res.data?.user?.email || res.data?.email || user.email,
+      };
+
+      updateStoredAuthUser(updatedUser);
+      setUser({
+        fullName: updatedUser.fullName || "",
+        email: updatedUser.email || "",
+        phone: updatedUser.phone || "",
+      });
 
       toast.success("Cập nhật thông tin thành công!");
     }
@@ -111,7 +114,6 @@ export default function ProfilePage() {
     if (!newNote.label.trim()) return;
 
     const res = await dietNoteService.upsertNote({
-      userId: parseInt(userId!),
       noteType: newNote.noteType,
       label: newNote.label,
       keywords: [newNote.label],
@@ -128,7 +130,7 @@ export default function ProfilePage() {
   const handleDeleteDietNote = async (noteId: number) => {
     if (!requireAuth()) return;
 
-    const res = await dietNoteService.deleteNote(parseInt(userId!), noteId);
+    const res = await dietNoteService.deleteNote(noteId);
     if (res.success) {
       toast.success("Đã xóa ghi chú");
       loadAllData();

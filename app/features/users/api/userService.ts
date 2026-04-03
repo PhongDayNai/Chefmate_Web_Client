@@ -1,8 +1,8 @@
-import axios from "axios";
+import axios from "~/lib/apiClient";
 import { checkAuth } from "~/utils/authUtils";
 import { buildApiUrl } from "~/lib/apiConfig";
 
-const BASE_URL = buildApiUrl("/api/users");
+const BASE_URL = buildApiUrl("/v2/users");
 
 export const userService = {
   changePassword: async (data: any) => {
@@ -19,12 +19,12 @@ export const userService = {
       throw new Error("AUTH_REQUIRED");
     }
 
-    const res = await axios.post(`${BASE_URL}/update-user-information`, data);
+    const res = await axios.patch(`${BASE_URL}/me`, data);
     return res.data;
   },
 
-  getViewHistory: async (userId: number) => {
-    const res = await axios.get(`${BASE_URL}/recipes-view-history?userId=${userId}`);
+  getViewHistory: async () => {
+    const res = await axios.get(`${BASE_URL}/recipes-view-history`);
     return res.data;
   },
 };

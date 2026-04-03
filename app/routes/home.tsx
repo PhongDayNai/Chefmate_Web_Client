@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { recipeService } from "~/features/recipes/api/recipeService";
 import RecipeList from "~/features/recipes/components/RecipeList";
 import type { Recipe, TrendingPeriod } from "~/features/recipes/types";
+import { getAuthUser } from "~/utils/authUtils";
 
 const DEFAULT_LIMIT = 32;
 const MAX_AUTO_LOAD_BATCHES = 2;
@@ -35,13 +36,8 @@ export default function Home() {
       }
 
       try {
-        const rawUserId = localStorage.getItem("userId");
-        const parsedUserId = rawUserId ? Number(rawUserId) : NaN;
-        const userId = Number.isFinite(parsedUserId) && parsedUserId > 0 ? parsedUserId : undefined;
-
         const targetPage = reset ? 1 : pageRef.current;
         const res = await recipeService.getTrendingV2({
-          userId,
           page: targetPage,
           limit: DEFAULT_LIMIT,
           period,
@@ -75,8 +71,8 @@ export default function Home() {
   );
 
   useEffect(() => {
-    const savedName = localStorage.getItem("userName");
-    if (savedName) setUserName(savedName);
+    const authUser = getAuthUser();
+    if (authUser?.fullName) setUserName(authUser.fullName);
   }, []);
 
   useEffect(() => {

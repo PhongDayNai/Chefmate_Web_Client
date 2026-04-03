@@ -31,6 +31,7 @@ import type {
 import { dietNoteService } from "~/features/users/api/dietNoteService";
 import { pantryService } from "~/features/pantry/api/pantryService";
 import { recipeService } from "~/features/recipes/api/recipeService";
+import { getAuthUserId } from "~/utils/authUtils";
 
 const DEFAULT_LIMIT = 32;
 const MAX_NO_PROGRESS_ATTEMPTS = 2;
@@ -135,11 +136,7 @@ function chatReducer(state: ChatUiState, action: ChatAction): ChatUiState {
 }
 
 function getUserIdFromStorage(): number | null {
-  if (typeof window === "undefined") return null;
-  const raw = localStorage.getItem("userId");
-  if (!raw) return null;
-  const userId = Number(raw);
-  return Number.isFinite(userId) && userId > 0 ? userId : null;
+  return getAuthUserId();
 }
 
 function toNullableNumber(value: unknown): number | null {
@@ -665,9 +662,8 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
 
     try {
       const [res, trendingRes] = await Promise.all([
-        chatService.getRecommendations(userId, 12),
+        chatService.getRecommendations(12),
         recipeService.getTrendingV2({
-          userId,
           page: 1,
           limit: 12,
           period: "all",
@@ -691,7 +687,7 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
     if (!userId) return;
 
     try {
-      const res = await dietNoteService.getNotes(userId);
+      const res = await dietNoteService.getNotes();
       mergeState({ dietNotes: normalizeDietNotes(res?.data) });
     } catch {
       setError("Không thể tải ghi chú ăn uống");
@@ -704,11 +700,10 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
 
     try {
       const [dietRes, pantryRes, recommendationRes, trendingRes] = await Promise.all([
-        dietNoteService.getNotes(userId),
-        pantryService.getByUser(userId),
-        chatService.getRecommendations(userId, 12),
+        dietNoteService.getNotes(),
+        pantryService.getMine(),
+        chatService.getRecommendations(12),
         recipeService.getTrendingV2({
-          userId,
           page: 1,
           limit: 12,
           period: "all",
@@ -737,7 +732,7 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
     mergeState({ loadingSessions: true });
 
     try {
-      const res = await chatService.listSessions(userId, 1, 50);
+      const res = await chatService.listSessions(1, 50);
       const data = extractData(res);
       const rawItems = Array.isArray(data?.items) ? data.items : Array.isArray(data) ? data : [];
       const sessions = rawItems
@@ -785,7 +780,7 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
     });
 
     try {
-      const res = await chatService.getSessionHistory(storedSessionId, userId);
+      const res = await chatService.getSessionHistory(storedSessionId);
       const data = extractData(res);
       const timeline = mergeAndSortTimeline([], normalizeMessages(data?.messages));
 
@@ -834,7 +829,6 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
 
       try {
         const res = await chatService.getUnifiedTimeline({
-          userId,
           limit,
           beforeMessageId,
         });
@@ -968,13 +962,11 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
           let response: any;
           if (!latestSessionId && normalizedItems.length > 0) {
             response = await chatService.createMealSession({
-              userId,
               title: latest.currentSession?.title || "Bepes",
               recipeIds: normalizedItems.map((item) => item.recipeId),
             });
           } else if (latestSessionId) {
             response = await chatService.replaceMealRecipes({
-              userId,
               chatSessionId: latestSessionId,
               recipes: normalizedItems.map((item) => ({
                 recipeId: item.recipeId,
@@ -1081,7 +1073,6 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
         await enqueueMealMutation(async () => {
           if (!sessionId) {
             const createRes = await chatService.createMealSession({
-              userId,
               title: fallbackSession?.title || "Bepes",
               recipeIds: current.mealItems.map((item) => item.recipeId),
             });
@@ -1109,7 +1100,6 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
           }
 
           const response = await chatService.setPrimaryRecipe({
-            userId,
             chatSessionId: sessionId,
             recipeId,
           });
@@ -1198,7 +1188,6 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
 
         const response = await enqueueMealMutation(async () =>
           chatService.updateMealRecipeStatus({
-            userId,
             chatSessionId: sessionId,
             recipeId: payload.recipeId,
             status: payload.status,
@@ -1279,7 +1268,6 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
 
         const response = await enqueueMealMutation(async () =>
           chatService.updateMealRecipeStatus({
-            userId,
             chatSessionId: sessionId,
             recipeId: pending.pendingStatusPayload.recipeId,
             status: pending.pendingStatusPayload.status,
@@ -1360,7 +1348,6 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
 
       try {
         const responsePayload = await chatService.sendV2Message({
-          userId,
           chatSessionId: current.mealSession.chatSessionId ?? undefined,
           message: outboundMessage,
           useUnifiedSession: current.mealSession.chatSessionId ? undefined : true,
@@ -1515,7 +1502,6 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
         mergeState({ mealSyncing: true });
 
         const payload: CompleteMealSessionPayload = {
-          userId,
           chatSessionId,
           completionType: options.completionType ?? "completed",
           note: options.note ?? null,
@@ -1612,8 +1598,7 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
       if (!userId) return false;
 
       try {
-        const finalPayload = { ...payload, userId };
-        const res = await dietNoteService.upsertNote(finalPayload);
+        const res = await dietNoteService.upsertNote(payload);
         if (res?.success === false) return false;
 
         await refreshDietNotes();
@@ -1633,7 +1618,7 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
       if (!userId) return false;
 
       try {
-        const res = await dietNoteService.deleteNote(userId, noteId);
+        const res = await dietNoteService.deleteNote(noteId);
         if (res?.success === false) return false;
 
         await refreshDietNotes();

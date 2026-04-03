@@ -1,38 +1,38 @@
 // app/features/pantry/api/pantryService.ts
-import axios from "axios";
+import axios from "~/lib/apiClient";
 import { checkAuth } from "~/utils/authUtils";
 import { buildApiUrl } from "~/lib/apiConfig";
 
-const BASE_URL = buildApiUrl("/api");
+const BASE_URL = buildApiUrl("/v2/pantry");
 
 export const pantryService = {
-  getByUser: async (userId: number) => {
-    const res = await axios.get(`${BASE_URL}/pantry?userId=${userId}`);
+  getMine: async () => {
+    const res = await axios.get(BASE_URL);
     return res.data;
   },
 
-  upsert: async (payload: { userId: number; ingredientName: string; quantity: number; unit: string; expiresAt: string }) => {
+  upsert: async (payload: { ingredientName: string; quantity: number; unit: string; expiresAt: string }) => {
     if (!checkAuth()) {
       throw new Error("AUTH_REQUIRED");
     }
 
-    const res = await axios.post(`${BASE_URL}/pantry/upsert`, payload);
+    const res = await axios.post(`${BASE_URL}/upsert`, payload);
     return res.data;
   },
 
-  delete: async (userId: number, pantryItemId: number) => {
+  delete: async (pantryItemId: number) => {
     if (!checkAuth()) {
       throw new Error("AUTH_REQUIRED");
     }
 
-    const res = await axios.delete(`${BASE_URL}/pantry/delete`, {
-      data: { userId, pantryItemId },
+    const res = await axios.delete(`${BASE_URL}/delete`, {
+      data: { pantryItemId },
     });
     return res.data;
   },
 
   getAllIngredients: async () => {
-    const res = await axios.get(`${BASE_URL}/recipes/ingredients`);
+    const res = await axios.get(buildApiUrl("/v2/recipes/ingredients"));
     return res.data;
   },
 };

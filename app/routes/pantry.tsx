@@ -9,6 +9,7 @@ import { Plus, Refrigerator, ChevronLeft } from "lucide-react";
 import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
 import type { PantryItemType } from "~/features/pantry/types";
+import { checkAuth } from "~/utils/authUtils";
 
 export default function PantryPage() {
   const router = useRouter();
@@ -18,13 +19,12 @@ export default function PantryPage() {
   const [isModalOpen, setModalOpen] = useState(false);
 
   const fetchPantry = async () => {
-    const userId = localStorage.getItem("userId");
-    if (!userId) {
+    if (!checkAuth()) {
       setLoading(false);
       return;
     }
     try {
-      const res = await pantryService.getByUser(parseInt(userId));
+      const res = await pantryService.getMine();
       if (res.success) setItems(res.data);
     } catch (error) {
       console.error(error);
@@ -55,12 +55,10 @@ export default function PantryPage() {
 
   const handleDelete = async (itemId: number) => {
     if (!requireAuth()) return;
-
-    const userId = localStorage.getItem("userId");
-    if (!userId || !confirm("Bạn có chắc muốn bỏ nguyên liệu này?")) return;
+    if (!confirm("Bạn có chắc muốn bỏ nguyên liệu này?")) return;
 
     try {
-      const res = await pantryService.delete(parseInt(userId), itemId);
+      const res = await pantryService.delete(itemId);
       if (res.success) {
         toast.success("Đã xóa khỏi tủ lạnh");
         fetchPantry();

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Refrigerator, Home, LogOut, Search as SearchIcon, PlusCircle } from "lucide-react";
 import { useEffect, useState } from "react";
+import { clearAuthSession, getAuthUser } from "~/utils/authUtils";
 
 export default function Navbar() {
   const router = useRouter();
@@ -11,7 +12,10 @@ export default function Navbar() {
   const [userName, setUserName] = useState<string | null>(null);
 
   useEffect(() => {
-    setUserName(localStorage.getItem("userName"));
+    const syncUserName = () => setUserName(getAuthUser()?.fullName || null);
+    syncUserName();
+    window.addEventListener("storage", syncUserName);
+    return () => window.removeEventListener("storage", syncUserName);
   }, []);
 
   const handleSearch = (e: React.FormEvent) => {
@@ -23,7 +27,7 @@ export default function Navbar() {
   };
 
   const handleLogout = () => {
-    localStorage.clear();
+    clearAuthSession();
     window.location.href = "/auth";
   };
 

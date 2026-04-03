@@ -16,12 +16,7 @@ export default function AddIngredientModal({ isOpen, onClose, onSuccess }: Props
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const userId = localStorage.getItem("userId");
-    if (!userId) return;
-
-    // Giả lập gọi API upsert
     const payload = {
-      userId: parseInt(userId),
       ingredientName: form.name,
       quantity: form.qty,
       unit: form.unit,

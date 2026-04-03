@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { authService } from "../api/authService";
-import { getAndClearRedirectUrl } from "~/utils/authUtils";
+import { getAndClearRedirectUrl, getAuthUser } from "~/utils/authUtils";
 import toast from "react-hot-toast";
 
 interface Props {
@@ -23,10 +23,9 @@ export default function LoginForm({ onSwitch, onForgot }: Props) {
     try {
       const res = await authService.login(identifier, password);
       if (res.success) {
-        localStorage.setItem("userId", res.data.userId.toString());
-        localStorage.setItem("userName", res.data.fullName);
+        const authUser = getAuthUser();
 
-        toast.success(`Chào mừng ${res.data.fullName} trở lại!`);
+        toast.success(`Chào mừng ${authUser?.fullName || "bạn"} trở lại!`);
 
         setTimeout(() => {
           const redirectUrl = getAndClearRedirectUrl();

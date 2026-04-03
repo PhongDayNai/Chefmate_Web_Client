@@ -1,9 +1,21 @@
 // app/lib/apiClient.ts
-import axios, { AxiosHeaders } from "axios";
+import axios, { AxiosError, AxiosHeaders, InternalAxiosRequestConfig } from "axios";
 import toast from "react-hot-toast";
-import { API_BASE_URL, CHAT_API_TOKEN } from "~/lib/apiConfig";
+import { API_BASE_URL, CHAT_API_TOKEN, buildApiUrl } from "~/lib/apiConfig";
+import {
+  clearAuthSession,
+  getAccessToken,
+  getRefreshToken,
+  normalizeAuthSessionPayload,
+  persistAuthSession,
+} from "~/utils/authUtils";
 
-// Khởi tạo instance axios với cấu hình mặc định
+interface RetryableRequestConfig extends InternalAxiosRequestConfig {
+  _retry?: boolean;
+}
+
+type RefreshSubscriber = (accessToken: string | null) => void;
+
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
   headers: {
@@ -11,58 +23,140 @@ const apiClient = axios.create({
   },
 });
 
-// --- INTERCEPTOR CHO REQUEST (TRƯỚC KHI GỬI ĐI) ---
+let isRefreshing = false;
+let refreshSubscribers: RefreshSubscriber[] = [];
+
+function isChatRequest(url?: string): boolean {
+  return Boolean(url?.includes("/v2/ai-chat") || url?.includes("/v2/ai-chat-v1"));
+}
+
+function isAuthRequest(url?: string): boolean {
+  return Boolean(
+    url?.includes("/v2/users/login") ||
+      url?.includes("/v2/users/register") ||
+      url?.includes("/v2/users/forgot-password") ||
+      url?.includes("/v2/users/refresh-token"),
+  );
+}
+
+function notifyRefreshSubscribers(accessToken: string | null) {
+  refreshSubscribers.forEach((callback) => callback(accessToken));
+  refreshSubscribers = [];
+}
+
+function subscribeToRefresh(callback: RefreshSubscriber) {
+  refreshSubscribers.push(callback);
+}
+
+function redirectToAuth(message: string) {
+  clearAuthSession();
+  if (typeof window === "undefined") return;
+  toast.error(message);
+  window.location.href = "/auth";
+}
+
+async function refreshAccessToken(): Promise<string | null> {
+  const refreshToken = getRefreshToken();
+  if (!refreshToken) return null;
+
+  const response = await axios.post(buildApiUrl("/v2/users/refresh-token"), {
+    refreshToken,
+  });
+
+  const session = normalizeAuthSessionPayload(response.data?.data);
+  if (!session) {
+    return null;
+  }
+
+  persistAuthSession(session);
+  return session.accessToken;
+}
+
 apiClient.interceptors.request.use(
   (config) => {
     const headers = AxiosHeaders.from(config.headers);
-    const isChatRequest = config.url?.includes("/api/ai-chat");
+    const accessToken = getAccessToken();
 
-    if (isChatRequest && CHAT_API_TOKEN && !headers.has("Authorization")) {
-      headers.set("Authorization", `Bearer ${CHAT_API_TOKEN}`);
+    if (accessToken && !headers.has("Authorization") && !isAuthRequest(config.url)) {
+      headers.set("Authorization", `Bearer ${accessToken}`);
+    }
+
+    if (isChatRequest(config.url) && CHAT_API_TOKEN && !headers.has("x-api-key")) {
+      headers.set("x-api-key", CHAT_API_TOKEN);
     }
 
     config.headers = headers;
-
-    // Lấy userId từ máy người dùng
-    const userId = typeof window !== "undefined" ? localStorage.getItem("userId") : null;
-    
-    // Kiểm tra xem hành động có phải là ghi dữ liệu (POST, PUT, DELETE, PATCH) không
-    const isWriteAction = ["post", "put", "delete", "patch"].includes(
-      config.method?.toLowerCase() || ""
-    );
-
-    // LOGIC BẢO VỆ: Nếu định ghi dữ liệu mà chưa đăng nhập thì chặn lại
-    if (isWriteAction && !userId) {
-      // Ngoại trừ các API đăng nhập/đăng ký (nếu dùng chung apiClient)
-      const isAuthPath = config.url?.includes("/users/login") || config.url?.includes("/users/register");
-      
-      if (!isAuthPath) {
-        toast.error("Vui lòng đăng nhập để thực hiện tính năng này!");
-        // Trì hoãn một chút để người dùng kịp đọc toast rồi mới nhảy trang
-        setTimeout(() => {
-          window.location.href = "/auth";
-        }, 1000);
-        return Promise.reject("Unauthorized: Please login.");
-      }
-    }
-
     return config;
   },
-  (error) => Promise.reject(error)
+  (error) => Promise.reject(error),
 );
 
-// --- INTERCEPTOR CHO RESPONSE (SAU KHI NHẬN KẾT QUẢ) ---
 apiClient.interceptors.response.use(
   (response) => response,
-  (error) => {
-    // Xử lý các lỗi chung từ server (ví dụ 401 Unauthorized)
-    if (error.response?.status === 401) {
-      toast.error("Phiên đăng nhập hết hạn!");
-      localStorage.clear();
-      window.location.href = "/auth";
+  async (error: AxiosError) => {
+    const originalRequest = error.config as RetryableRequestConfig | undefined;
+    const status = error.response?.status;
+
+    if (!originalRequest || status !== 401 || originalRequest._retry || isAuthRequest(originalRequest.url)) {
+      return Promise.reject(error);
     }
-    return Promise.reject(error);
-  }
+
+    const refreshToken = getRefreshToken();
+    if (!refreshToken) {
+      if (getAccessToken()) {
+        redirectToAuth("Phiên đăng nhập hết hạn!");
+      }
+      return Promise.reject(error);
+    }
+
+    if (isRefreshing) {
+      return new Promise((resolve, reject) => {
+        subscribeToRefresh((nextAccessToken) => {
+          if (!nextAccessToken) {
+            reject(error);
+            return;
+          }
+
+          const headers = AxiosHeaders.from(originalRequest.headers);
+          headers.set("Authorization", `Bearer ${nextAccessToken}`);
+          if (isChatRequest(originalRequest.url) && CHAT_API_TOKEN) {
+            headers.set("x-api-key", CHAT_API_TOKEN);
+          }
+
+          originalRequest.headers = headers;
+          resolve(apiClient(originalRequest));
+        });
+      });
+    }
+
+    originalRequest._retry = true;
+    isRefreshing = true;
+
+    try {
+      const nextAccessToken = await refreshAccessToken();
+      notifyRefreshSubscribers(nextAccessToken);
+
+      if (!nextAccessToken) {
+        redirectToAuth("Phiên đăng nhập hết hạn!");
+        return Promise.reject(error);
+      }
+
+      const headers = AxiosHeaders.from(originalRequest.headers);
+      headers.set("Authorization", `Bearer ${nextAccessToken}`);
+      if (isChatRequest(originalRequest.url) && CHAT_API_TOKEN) {
+        headers.set("x-api-key", CHAT_API_TOKEN);
+      }
+
+      originalRequest.headers = headers;
+      return apiClient(originalRequest);
+    } catch (refreshError) {
+      notifyRefreshSubscribers(null);
+      redirectToAuth("Phiên đăng nhập hết hạn!");
+      return Promise.reject(refreshError);
+    } finally {
+      isRefreshing = false;
+    }
+  },
 );
 
 export default apiClient;

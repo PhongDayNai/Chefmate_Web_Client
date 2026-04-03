@@ -109,18 +109,11 @@ export default function CreateRecipe() {
 
     if (!formData.image) return toast.error("Vui lòng chọn ảnh món ăn!");
 
-    const userId = localStorage.getItem("userId");
-    if (!userId) {
-      toast.error("Không tìm thấy thông tin người dùng. Vui lòng đăng nhập lại.");
-      setLoading(false);
-      return;
-    }
     setLoading(true);
     const body = new FormData();
     body.append("recipeName", formData.recipeName);
     body.append("cookingTime", formData.cookingTime);
     body.append("ration", formData.ration.toString());
-    body.append("userId", userId);
     body.append("image", formData.image);
     
     // Format mảng object thành JSON string theo yêu cầu Backend

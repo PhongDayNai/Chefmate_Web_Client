@@ -9,27 +9,26 @@ import type {
   UpdateMealRecipeStatusPayload,
 } from "~/features/chat/types";
 
-const BASE_URL_V1 = "/api/ai-chat";
-const BASE_URL_V2 = "/api/ai-chat/v2";
+const BASE_URL_V1 = "/v2/ai-chat-v1";
+const BASE_URL_V2 = "/v2/ai-chat";
 
 export const chatService = {
-  listSessions: (userId: number, page = 1, limit = 50) =>
-    axios.get(`${BASE_URL_V1}/sessions`, { params: { userId, page, limit } }).then((res: any) => res.data),
+  listSessions: (page = 1, limit = 50) =>
+    axios.get(`${BASE_URL_V1}/sessions`, { params: { page, limit } }).then((res: any) => res.data),
 
-  getSessionHistory: (sessionId: number, userId: number) =>
-    axios.get(`${BASE_URL_V1}/sessions/${sessionId}`, { params: { userId } }).then((res: any) => res.data),
+  getSessionHistory: (sessionId: number) =>
+    axios.get(`${BASE_URL_V1}/sessions/${sessionId}`).then((res: any) => res.data),
 
-  deleteSession: (sessionId: number, userId: number) =>
-    axios.delete(`${BASE_URL_V1}/sessions/${sessionId}`, { params: { userId } }).then((res: any) => res.data),
+  deleteSession: (sessionId: number) => axios.delete(`${BASE_URL_V1}/sessions/${sessionId}`).then((res: any) => res.data),
 
-  updateTitle: (data: { userId: number; chatSessionId: number; title: string }) =>
+  updateTitle: (data: { chatSessionId: number; title: string }) =>
     axios.patch(`${BASE_URL_V1}/sessions/title`, data).then((res: any) => res.data),
 
-  getRecommendations: (userId: number, limit = 10) =>
-    axios.post(`${BASE_URL_V1}/recommendations-from-pantry`, { userId, limit }).then((res: any) => res.data),
+  getRecommendations: (limit = 10) =>
+    axios.post(`${BASE_URL_V1}/recommendations-from-pantry`, { limit }).then((res: any) => res.data),
 
-  getUnifiedTimeline: ({ userId, limit = 32, beforeMessageId }: UnifiedTimelineParams) =>
-    axios.get(`${BASE_URL_V1}/messages`, { params: { userId, limit, beforeMessageId } }).then((res: any) => res.data),
+  getUnifiedTimeline: ({ limit = 32, beforeMessageId }: UnifiedTimelineParams) =>
+    axios.get(`${BASE_URL_V1}/messages`, { params: { limit, beforeMessageId } }).then((res: any) => res.data),
 
   createMealSession: (data: CreateMealSessionPayload) =>
     axios.post(`${BASE_URL_V2}/sessions/meal`, data).then((res: any) => res.data),

@@ -143,13 +143,11 @@ export interface ChatUiState {
 }
 
 export interface UnifiedTimelineParams {
-  userId: number;
   limit?: number;
   beforeMessageId?: number;
 }
 
 export interface SendMessagePayload {
-  userId: number;
   chatSessionId?: number;
   message: string;
   stream?: boolean;
@@ -157,13 +155,11 @@ export interface SendMessagePayload {
 }
 
 export interface CreateMealSessionPayload {
-  userId: number;
   title?: string;
   recipeIds: number[];
 }
 
 export interface ReplaceMealRecipesPayload {
-  userId: number;
   chatSessionId: number;
   recipes: Array<{
     recipeId: number;
@@ -175,13 +171,11 @@ export interface ReplaceMealRecipesPayload {
 }
 
 export interface SetPrimaryRecipePayload {
-  userId: number;
   chatSessionId: number;
   recipeId: number | null;
 }
 
 export interface UpdateMealRecipeStatusPayload {
-  userId: number;
   chatSessionId: number;
   recipeId: number;
   status: MealRecipeStatus;
@@ -190,7 +184,6 @@ export interface UpdateMealRecipeStatusPayload {
 }
 
 export interface CompleteMealSessionPayload {
-  userId: number;
   chatSessionId: number;
   completionType?: MealCompletionType;
   note?: string | null;

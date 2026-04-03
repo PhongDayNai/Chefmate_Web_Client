@@ -8,6 +8,7 @@ import { recipeService } from "~/features/recipes/api/recipeService";
 import { interactionService } from "~/features/interactions/api/interactionService";
 import { useAuthGuard } from "~/hooks/useAuthGuard";
 import { API_BASE_URL } from "~/lib/apiConfig";
+import { getAuthUser } from "~/utils/authUtils";
 import {
   Clock,
   Users,
@@ -30,8 +31,8 @@ export default function RecipeDetail() {
   const [isLiked, setIsLiked] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  // Lấy userId hiện tại từ localStorage
-  const currentUserId = typeof window !== "undefined" ? localStorage.getItem("userId") : null;
+  const authUser = getAuthUser();
+  const currentUserId = authUser?.userId ?? null;
 
   // Hàm load lại dữ liệu món ăn
   const loadRecipe = async () => {
@@ -55,7 +56,7 @@ export default function RecipeDetail() {
   const handleLike = async () => {
     if (!requireAuth()) return;
 
-    const res = await interactionService.likeRecipe(parseInt(currentUserId!), recipe!.recipeId);
+    const res = await interactionService.likeRecipe(recipe!.recipeId);
     if (res.success) {
       setIsLiked(!isLiked);
       toast.success(isLiked ? "Đã bỏ yêu thích" : "Đã thêm vào yêu thích");
@@ -70,7 +71,7 @@ export default function RecipeDetail() {
 
     if (!comment.trim()) return;
 
-    const res = await interactionService.createComment(parseInt(currentUserId!), recipe!.recipeId, comment);
+    const res = await interactionService.createComment(recipe!.recipeId, comment);
     if (res.success) {
       toast.success("Đã gửi bình luận!");
       setComment("");
@@ -200,7 +201,7 @@ export default function RecipeDetail() {
 
              <form onSubmit={handleSendComment} className="flex gap-4 mb-12">
                 <div className="w-12 h-12 bg-orange-100 rounded-full flex-none flex items-center justify-center font-black text-[#f59127] uppercase">
-                   {currentUserId ? (localStorage.getItem("userName")?.charAt(0) || "U") : "U"}
+                   {currentUserId ? (authUser?.fullName?.charAt(0) || "U") : "U"}
                 </div>
                 <div className="flex-1 relative">
                    <input 
@@ -228,7 +229,7 @@ export default function RecipeDetail() {
                                 <p className="font-black text-xs text-[#f59127] uppercase">{cmt.userName}</p>
                                 
                                 {/* Chỉ hiện nút xóa nếu comment thuộc về User đang đăng nhập */}
-                                {currentUserId && parseInt(currentUserId) === cmt.userId && (
+                                {currentUserId && currentUserId === cmt.userId && (
                                   <button 
                                     onClick={() => handleDeleteComment(cmt.commentId)}
                                     className="text-gray-300 hover:text-red-500 transition-colors p-1"
