@@ -23,6 +23,13 @@ cp .env.example .env.local
 Mặc định:
 
 - `NEXT_PUBLIC_API_BASE_URL=https://your-api-url.com`
+- `NEXT_PUBLIC_CHAT_API_TOKEN=sk-tao-deo-cho-chat`
+
+Các request đi vào nhóm endpoint `/api/ai-chat*` sẽ tự động được gắn header:
+
+```http
+Authorization: Bearer <NEXT_PUBLIC_CHAT_API_TOKEN>
+```
 
 ## Chạy local
 

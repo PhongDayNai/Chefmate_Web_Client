@@ -1,7 +1,7 @@
 // app/lib/apiClient.ts
-import axios from "axios";
+import axios, { AxiosHeaders } from "axios";
 import toast from "react-hot-toast";
-import { API_BASE_URL } from "~/lib/apiConfig";
+import { API_BASE_URL, CHAT_API_TOKEN } from "~/lib/apiConfig";
 
 // Khởi tạo instance axios với cấu hình mặc định
 const apiClient = axios.create({
@@ -14,6 +14,15 @@ const apiClient = axios.create({
 // --- INTERCEPTOR CHO REQUEST (TRƯỚC KHI GỬI ĐI) ---
 apiClient.interceptors.request.use(
   (config) => {
+    const headers = AxiosHeaders.from(config.headers);
+    const isChatRequest = config.url?.includes("/api/ai-chat");
+
+    if (isChatRequest && CHAT_API_TOKEN && !headers.has("Authorization")) {
+      headers.set("Authorization", `Bearer ${CHAT_API_TOKEN}`);
+    }
+
+    config.headers = headers;
+
     // Lấy userId từ máy người dùng
     const userId = typeof window !== "undefined" ? localStorage.getItem("userId") : null;
     
