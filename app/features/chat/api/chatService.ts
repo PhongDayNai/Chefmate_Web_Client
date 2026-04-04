@@ -2,6 +2,7 @@ import axios from "~/lib/apiClient";
 import type {
   CompleteMealSessionPayload,
   CreateMealSessionPayload,
+  ResolveCompletionCheckPayload,
   ReplaceMealRecipesPayload,
   SendMessagePayload,
   SetPrimaryRecipePayload,
@@ -49,6 +50,9 @@ export const chatService = {
         stream: false,
       })
       .then((res: any) => res.data),
+
+  resolveCompletionCheckV2: (data: ResolveCompletionCheckPayload) =>
+    axios.post(`${BASE_URL_V2}/sessions/meal/resolve-completion-check`, data).then((res: any) => res.data),
 
   completeMealSession: (data: CompleteMealSessionPayload) =>
     axios.patch(`${BASE_URL_V2}/sessions/meal/complete`, data).then((res: any) => res.data),

@@ -13,11 +13,18 @@ import toast from "react-hot-toast";
 import { chatService } from "~/features/chat/api/chatService";
 import type {
   ChatMessage,
+  ChatMessageMeta,
   ChatPaging,
   ChatRecommendation,
   ChatSession,
   ChatUiState,
   CompleteMealSessionPayload,
+  CompletionCheckAction,
+  CompletionCheckActionId,
+  CompletionCheckMessageMeta,
+  CompletionCheckMessageStatus,
+  CompletionCheckPayload,
+  CompletionCheckStatus,
   DietNote,
   MealCompletionType,
   MealItem,
@@ -26,6 +33,7 @@ import type {
   MealSessionState,
   MealSnapshot,
   PantryItem,
+  PendingCompletionCheckState,
   PendingPrimarySwitch,
 } from "~/features/chat/types";
 import { dietNoteService } from "~/features/users/api/dietNoteService";
@@ -40,6 +48,7 @@ const LAST_CHAT_SESSION_ID_KEY = "lastChatSessionId";
 const LAST_CHAT_USER_ID_KEY = "lastChatUserId";
 const MEAL_SNAPSHOT_KEY_PREFIX = "chatMealSnapshot";
 const LATEST_MEAL_SNAPSHOT_KEY_PREFIX = "chatMealLatestSession";
+const COMPLETION_CHECK_PENDING_CODE = "PENDING_MEAL_V2_COMPLETION_CHECK";
 
 type ChatAction =
   | { type: "MERGE"; payload: Partial<ChatUiState> }
@@ -75,6 +84,7 @@ const initialState: ChatUiState = {
   mealSession: initialMealSession,
   mealItems: [],
   pendingPrimarySwitch: null,
+  pendingCompletionCheck: null,
   mealSyncing: false,
 };
 
@@ -102,6 +112,11 @@ interface UpdateMealStatusOptions {
   note?: string | null;
 }
 
+interface ResolveCompletionCheckOptions {
+  messageTempId: string;
+  action: CompletionCheckActionId;
+}
+
 interface ChatFlowContextValue {
   state: ChatUiState;
   isLoggedIn: boolean;
@@ -115,6 +130,7 @@ interface ChatFlowContextValue {
   bootstrapUnifiedTimeline: () => Promise<void>;
   loadOlderMessages: () => Promise<void>;
   sendMessage: (message: string, options?: SendMessageOptions) => Promise<void>;
+  resolveCompletionCheck: (options: ResolveCompletionCheckOptions) => Promise<boolean>;
   retryMessage: (tempId: string) => Promise<void>;
   syncMealSelection: (items: MealItem[]) => Promise<boolean>;
   setPrimaryRecipe: (recipeId: number | null) => Promise<boolean>;
@@ -185,6 +201,10 @@ function extractData(input: any): any {
   return input?.data ?? input;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
 function normalizeSession(raw: any): ChatSession | null {
   if (!raw || typeof raw !== "object") return null;
   const chatSessionId = Number(raw.chatSessionId);
@@ -218,7 +238,7 @@ function normalizeMessage(raw: any): ChatMessage | null {
     isSessionStart: Boolean(raw.isSessionStart),
     role,
     content,
-    meta: raw.meta ?? null,
+    meta: isRecord(raw.meta) ? (raw.meta as ChatMessageMeta) : null,
     createdAt: typeof raw.createdAt === "string" ? raw.createdAt : new Date().toISOString(),
     isPending: Boolean(raw.isPending),
     isFailed: Boolean(raw.isFailed),
@@ -243,6 +263,52 @@ function normalizeMessages(raw: any): ChatMessage[] {
   return source
     .map((item: any) => normalizeMessage(item))
     .filter((item: ChatMessage | null): item is ChatMessage => Boolean(item));
+}
+
+function normalizeCompletionCheckAction(raw: any): CompletionCheckAction | null {
+  if (!raw || typeof raw !== "object") return null;
+  const id = raw.id;
+  if (id !== "mark_done" && id !== "mark_skipped" && id !== "continue_current") return null;
+  const label = typeof raw.label === "string" ? raw.label.trim() : "";
+  if (!label) return null;
+
+  return {
+    id,
+    label,
+  };
+}
+
+function normalizeCompletionCheckPayload(raw: any): CompletionCheckPayload | null {
+  if (!raw || typeof raw !== "object") return null;
+
+  const recipeId = Number(raw.recipeId);
+  const recipeName = typeof raw.recipeName === "string" ? raw.recipeName.trim() : "";
+  const reminderMessage = typeof raw.reminderMessage === "string" ? raw.reminderMessage.trim() : "";
+  const actions = Array.isArray(raw.actions)
+    ? raw.actions
+        .map((item: any) => normalizeCompletionCheckAction(item))
+        .filter((item: CompletionCheckAction | null): item is CompletionCheckAction => Boolean(item))
+    : [];
+
+  if (!Number.isFinite(recipeId) || recipeId <= 0 || !recipeName || !reminderMessage || !actions.length) {
+    return null;
+  }
+
+  return {
+    recipeId,
+    recipeName,
+    minutesSinceLastMessage: Number(raw.minutesSinceLastMessage ?? 0) || 0,
+    isStrongReminder: Boolean(raw.isStrongReminder),
+    reminderMessage,
+    pendingUserMessage:
+      typeof raw.pendingUserMessage === "string" && raw.pendingUserMessage.trim()
+        ? raw.pendingUserMessage.trim()
+        : undefined,
+    actions,
+    countToday: raw.countToday !== undefined && raw.countToday !== null ? Number(raw.countToday) : undefined,
+    dayKey: typeof raw.dayKey === "string" ? raw.dayKey : undefined,
+    cooldownMinutes: raw.cooldownMinutes !== undefined && raw.cooldownMinutes !== null ? Number(raw.cooldownMinutes) : undefined,
+  };
 }
 
 function normalizePaging(raw: any, fallbackLimit: number): ChatPaging {
@@ -476,6 +542,118 @@ function hasAiBusyCode(error: any): boolean {
 
 function hasPendingSwitchCode(payload: any): boolean {
   return payload?.code === "PENDING_PRIMARY_RECIPE_SWITCH_CONFIRMATION" || payload?.data?.code === "PENDING_PRIMARY_RECIPE_SWITCH_CONFIRMATION";
+}
+
+function hasPendingCompletionCheckCode(payload: any): boolean {
+  return payload?.code === COMPLETION_CHECK_PENDING_CODE || payload?.data?.code === COMPLETION_CHECK_PENDING_CODE;
+}
+
+function isCompletionCheckRetryableError(error: any): boolean {
+  const status = Number(error?.response?.status);
+  return status === 400 || status === 404;
+}
+
+function findCompletionCheckActionLabel(actions: CompletionCheckAction[], actionId: CompletionCheckActionId): string {
+  return actions.find((item) => item.id === actionId)?.label || actionId;
+}
+
+function buildCompletionCheckMessageMeta(options: {
+  actions: CompletionCheckAction[];
+  status: CompletionCheckMessageStatus;
+  selectedActionId?: CompletionCheckActionId;
+  selectedActionLabel?: string;
+}): ChatMessageMeta {
+  return {
+    flow: "meal_v2",
+    completionCheck: true,
+    actions: options.actions,
+    status: options.status,
+    selectedActionId: options.selectedActionId,
+    selectedActionLabel: options.selectedActionLabel,
+  };
+}
+
+function buildCompletionCheckMessage(options: {
+  tempId: string;
+  chatSessionId?: number | null;
+  reminderMessage: string;
+  actions: CompletionCheckAction[];
+  status: CompletionCheckMessageStatus;
+  selectedActionId?: CompletionCheckActionId;
+  selectedActionLabel?: string;
+}): ChatMessage {
+  return {
+    tempId: options.tempId,
+    role: "assistant",
+    content: options.reminderMessage,
+    createdAt: new Date().toISOString(),
+    chatSessionId: options.chatSessionId ?? undefined,
+    meta: buildCompletionCheckMessageMeta({
+      actions: options.actions,
+      status: options.status,
+      selectedActionId: options.selectedActionId,
+      selectedActionLabel: options.selectedActionLabel,
+    }),
+  };
+}
+
+function updateCompletionCheckMessage(
+  timeline: ChatMessage[],
+  messageTempId: string,
+  updater: (message: ChatMessage) => ChatMessage,
+): ChatMessage[] {
+  return timeline.map((message) => (message.tempId === messageTempId ? updater(message) : message));
+}
+
+function removeMessageByTempId(timeline: ChatMessage[], tempId: string): ChatMessage[] {
+  return timeline.filter((message) => message.tempId !== tempId);
+}
+
+function upsertCompletionCheckReminderMessage(options: {
+  timeline: ChatMessage[];
+  messageTempId: string;
+  chatSessionId?: number | null;
+  reminderMessage: string;
+  actions: CompletionCheckAction[];
+  status: CompletionCheckMessageStatus;
+  selectedActionId?: CompletionCheckActionId;
+  selectedActionLabel?: string;
+  resetTimestamp?: boolean;
+}): ChatMessage[] {
+  const existingMessage = options.timeline.find((message) => message.tempId === options.messageTempId);
+  const nextMessage = buildCompletionCheckMessage({
+    tempId: options.messageTempId,
+    chatSessionId: options.chatSessionId,
+    reminderMessage: options.reminderMessage,
+    actions: options.actions,
+    status: options.status,
+    selectedActionId: options.selectedActionId,
+    selectedActionLabel: options.selectedActionLabel,
+  });
+
+  if (existingMessage) {
+    return updateCompletionCheckMessage(options.timeline, options.messageTempId, (message) => ({
+      ...message,
+      content: nextMessage.content,
+      meta: nextMessage.meta,
+      chatSessionId: nextMessage.chatSessionId,
+      createdAt: options.resetTimestamp ? nextMessage.createdAt : message.createdAt,
+    }));
+  }
+
+  return mergeAndSortTimeline(options.timeline, [nextMessage]);
+}
+
+function hasServerEchoedUserMessage(messages: ChatMessage[], candidates: Array<string | undefined | null>): boolean {
+  const normalizedCandidates = candidates
+    .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    .map((value) => value.trim());
+
+  if (!normalizedCandidates.length) return false;
+
+  return messages.some(
+    (message) => message.role === "user" && normalizedCandidates.includes(message.content.trim()),
+  );
 }
 
 function mealSnapshotKey(userId: number, sessionId: number): string {
@@ -1377,6 +1555,47 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
     [commitMealSnapshot, enqueueMealMutation, getUserId, mergeState, setError],
   );
 
+  const refreshSessionHistory = useCallback(
+    async (sessionId: number) => {
+      const userId = getUserId();
+      if (!userId || !sessionId) return false;
+
+      try {
+        const response = await chatService.getSessionHistory(sessionId);
+        const data = extractData(response);
+        const session = normalizeSession(data?.session) ?? stateRef.current.currentSession;
+        const sessionMessages = normalizeMessages(data?.messages);
+        const nextTimeline = mergeAndSortTimeline(stateRef.current.timeline, sessionMessages);
+        const nextContext = buildMealContext({
+          payload: response,
+          userId,
+          state: stateRef.current,
+          fallbackSession: session,
+          fallbackMealItems: stateRef.current.mealItems,
+          fallbackActiveRecipeId: session?.activeRecipeId ?? stateRef.current.mealSession.activeRecipeId,
+        });
+
+        mergeState({
+          timeline: nextTimeline,
+          currentSessionId: nextContext.session?.chatSessionId ?? stateRef.current.currentSessionId,
+          currentSession: nextContext.session ?? stateRef.current.currentSession,
+          mealSession: nextContext.mealSession,
+          mealItems: nextContext.mealItems,
+        });
+        commitMealSnapshot(nextContext.mealSession, nextContext.mealItems, userId);
+
+        if (nextContext.session?.chatSessionId) {
+          persistLastSession(nextContext.session.chatSessionId, userId);
+        }
+
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    [commitMealSnapshot, getUserId, mergeState, persistLastSession],
+  );
+
   const sendMessage = useCallback(
     async (message: string, options: SendMessageOptions = {}) => {
       const userId = getUserId();
@@ -1388,6 +1607,12 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
       const current = stateRef.current;
       const cleanedMessage = message.trim();
       if (!cleanedMessage || current.sending) return;
+
+      if (current.pendingCompletionCheck && current.pendingCompletionCheck.status !== "error") {
+        toast.error("Hãy xác nhận trạng thái món hiện tại trước khi gửi tiếp");
+        return;
+      }
+
       const outboundMessage = buildFocusedMessage(cleanedMessage, current.mealSession, current.mealItems);
 
       if (current.mealSession.uiClosed) {
@@ -1429,18 +1654,6 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
         const responseData = extractData(responsePayload);
         const responseMessages = normalizeMessages(responseData);
         const responseSession = findPrimarySession(responsePayload) ?? stateRef.current.currentSession;
-        const assistantMessage =
-          typeof responseData?.assistantMessage === "string" && responseData.assistantMessage.trim()
-            ? normalizeMessage({
-                role: "assistant",
-                content: responseData.assistantMessage.trim(),
-                createdAt: new Date().toISOString(),
-                chatSessionId: responseSession?.chatSessionId ?? stateRef.current.currentSessionId,
-              })
-            : null;
-
-        const mergedResponseMessages = assistantMessage ? [...responseMessages, assistantMessage] : responseMessages;
-
         let timeline = stateRef.current.timeline.map((item) =>
           item.tempId === optimisticTempId
             ? {
@@ -1453,17 +1666,6 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
               }
             : item,
         );
-        timeline = mergeAndSortTimeline(timeline, mergedResponseMessages);
-
-        if (
-          mergedResponseMessages.some(
-            (item) =>
-              item.role === "user" &&
-              (item.content.trim() === cleanedMessage || item.content.trim() === outboundMessage),
-          )
-        ) {
-          timeline = timeline.filter((item) => item.tempId !== optimisticTempId);
-        }
 
         const nextContext = buildMealContext({
           payload: responsePayload,
@@ -1493,6 +1695,75 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
               }
             : nextContext.session
           : nextContext.session;
+
+        const completionCheck = normalizeCompletionCheckPayload(responseData?.completionCheck);
+        const completionCheckSessionId =
+          resolvedSession?.chatSessionId ??
+          resolvedMealSession.chatSessionId ??
+          current.mealSession.chatSessionId ??
+          current.currentSessionId;
+
+        if (hasServerEchoedUserMessage(responseMessages, [cleanedMessage, outboundMessage])) {
+          timeline = removeMessageByTempId(timeline, optimisticTempId);
+        }
+
+        if (hasPendingCompletionCheckCode(responsePayload) && completionCheck && completionCheckSessionId) {
+          const messageTempId =
+            current.pendingCompletionCheck?.messageTempId ?? `temp-completion-check-${Date.now()}`;
+          const pendingCompletionCheck: PendingCompletionCheckState = {
+            chatSessionId: completionCheckSessionId,
+            recipeId: completionCheck.recipeId,
+            pendingUserMessage: completionCheck.pendingUserMessage ?? cleanedMessage,
+            userTempId: optimisticTempId,
+            reminderMessage: completionCheck.reminderMessage,
+            actions: completionCheck.actions,
+            messageTempId,
+            status: "pending",
+          };
+
+          timeline = upsertCompletionCheckReminderMessage({
+            timeline,
+            messageTempId,
+            chatSessionId: completionCheckSessionId,
+            reminderMessage: completionCheck.reminderMessage,
+            actions: completionCheck.actions,
+            status: "pending",
+            resetTimestamp: current.pendingCompletionCheck?.messageTempId === messageTempId,
+          });
+
+          mergeState({
+            timeline,
+            currentSessionId: resolvedSession?.chatSessionId ?? stateRef.current.currentSessionId,
+            currentSession: resolvedSession ?? stateRef.current.currentSession,
+            mealSession: resolvedMealSession,
+            mealItems: nextContext.mealItems,
+            pendingPrimarySwitch: null,
+            pendingCompletionCheck,
+          });
+          commitMealSnapshot(resolvedMealSession, nextContext.mealItems, userId);
+
+          if (resolvedSession?.chatSessionId) {
+            persistLastSession(resolvedSession.chatSessionId, userId);
+          }
+          return;
+        }
+
+        const assistantMessage =
+          typeof responseData?.assistantMessage === "string" && responseData.assistantMessage.trim()
+            ? normalizeMessage({
+                role: "assistant",
+                content: responseData.assistantMessage.trim(),
+                createdAt: new Date().toISOString(),
+                chatSessionId: responseSession?.chatSessionId ?? stateRef.current.currentSessionId,
+              })
+            : null;
+
+        const mergedResponseMessages = assistantMessage ? [...responseMessages, assistantMessage] : responseMessages;
+        timeline = mergeAndSortTimeline(timeline, mergedResponseMessages);
+
+        if (hasServerEchoedUserMessage(mergedResponseMessages, [cleanedMessage, outboundMessage])) {
+          timeline = removeMessageByTempId(timeline, optimisticTempId);
+        }
 
         mergeState({
           timeline,
@@ -1557,6 +1828,144 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
       }
     },
     [commitMealSnapshot, getUserId, mergeState, persistLastSession, setError],
+  );
+
+  const resolveCompletionCheck = useCallback(
+    async ({ messageTempId, action }: ResolveCompletionCheckOptions) => {
+      const userId = getUserId();
+      const current = stateRef.current;
+      const pending = current.pendingCompletionCheck;
+
+      if (!userId || !pending || pending.messageTempId !== messageTempId) return false;
+      if (pending.status === "loading") return false;
+      if (!pending.actions.some((item) => item.id === action)) return false;
+
+      const actionLabel = findCompletionCheckActionLabel(pending.actions, action);
+      const pendingUserMessage = pending.pendingUserMessage.trim() ? pending.pendingUserMessage.trim() : undefined;
+
+      mergeState({
+        timeline: upsertCompletionCheckReminderMessage({
+          timeline: current.timeline,
+          messageTempId: pending.messageTempId,
+          chatSessionId: pending.chatSessionId,
+          reminderMessage: pending.reminderMessage,
+          actions: pending.actions,
+          status: "loading",
+        }),
+        pendingCompletionCheck: {
+          ...pending,
+          status: "loading",
+        },
+        sending: Boolean(pendingUserMessage),
+        mealSyncing: true,
+        errorMessage: null,
+      });
+
+      try {
+        const response = await enqueueMealMutation(async () =>
+          chatService.resolveCompletionCheckV2({
+            chatSessionId: pending.chatSessionId,
+            action,
+            pendingUserMessage,
+          }),
+        );
+
+        const responseData = extractData(response);
+        const responseMessages = normalizeMessages(responseData);
+        const responseSession = findPrimarySession(response) ?? stateRef.current.currentSession;
+        const assistantMessage =
+          typeof responseData?.assistantMessage === "string" && responseData.assistantMessage.trim()
+            ? normalizeMessage({
+                role: "assistant",
+                content: responseData.assistantMessage.trim(),
+                createdAt: new Date().toISOString(),
+                chatSessionId: responseSession?.chatSessionId ?? stateRef.current.currentSessionId,
+              })
+            : null;
+        const mergedResponseMessages = assistantMessage ? [...responseMessages, assistantMessage] : responseMessages;
+
+        let timeline = upsertCompletionCheckReminderMessage({
+          timeline: stateRef.current.timeline,
+          messageTempId: pending.messageTempId,
+          chatSessionId: pending.chatSessionId,
+          reminderMessage: pending.reminderMessage,
+          actions: pending.actions,
+          status: "resolved",
+          selectedActionId: action,
+          selectedActionLabel: actionLabel,
+        });
+
+        if (hasServerEchoedUserMessage(mergedResponseMessages, [pending.pendingUserMessage])) {
+          timeline = removeMessageByTempId(timeline, pending.userTempId);
+        }
+
+        timeline = mergeAndSortTimeline(timeline, mergedResponseMessages);
+
+        const nextContext = buildMealContext({
+          payload: response,
+          userId,
+          state: stateRef.current,
+          fallbackSession: responseSession,
+          fallbackMealItems: stateRef.current.mealItems,
+          fallbackActiveRecipeId: responseSession?.activeRecipeId ?? stateRef.current.mealSession.activeRecipeId,
+        });
+
+        mergeState({
+          timeline,
+          currentSessionId: nextContext.session?.chatSessionId ?? stateRef.current.currentSessionId,
+          currentSession: nextContext.session ?? stateRef.current.currentSession,
+          mealSession: nextContext.mealSession,
+          mealItems: nextContext.mealItems,
+          pendingPrimarySwitch: null,
+          pendingCompletionCheck: null,
+        });
+        commitMealSnapshot(nextContext.mealSession, nextContext.mealItems, userId);
+
+        if (nextContext.session?.chatSessionId) {
+          persistLastSession(nextContext.session.chatSessionId, userId);
+        }
+
+        return true;
+      } catch (error: any) {
+        if (isCompletionCheckRetryableError(error)) {
+          const failureMessage = error?.response?.data?.message || "Không thể xác nhận trạng thái món lúc này";
+          mergeState({
+            timeline: upsertCompletionCheckReminderMessage({
+              timeline: stateRef.current.timeline,
+              messageTempId: pending.messageTempId,
+              chatSessionId: pending.chatSessionId,
+              reminderMessage: pending.reminderMessage,
+              actions: pending.actions,
+              status: "error",
+            }),
+            pendingCompletionCheck: {
+              ...pending,
+              status: "error",
+            },
+          });
+          toast.error(failureMessage);
+          return false;
+        }
+
+        const refreshed = await refreshSessionHistory(pending.chatSessionId);
+        mergeState({
+          timeline: removeMessageByTempId(stateRef.current.timeline, pending.messageTempId),
+          pendingCompletionCheck: null,
+        });
+        setError(
+          refreshed
+            ? "Completion check không còn hợp lệ. Hội thoại đã được đồng bộ lại."
+            : "Không thể xử lý completion check lúc này",
+        );
+        return false;
+      } finally {
+        mergeState({
+          sending: false,
+          mealSyncing: false,
+        });
+      }
+    },
+    [commitMealSnapshot, enqueueMealMutation, getUserId, mergeState, persistLastSession, refreshSessionHistory, setError],
   );
 
   const retryMessage = useCallback(
@@ -1766,6 +2175,7 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
       bootstrapUnifiedTimeline,
       loadOlderMessages,
       sendMessage,
+      resolveCompletionCheck,
       retryMessage,
       syncMealSelection,
       setPrimaryRecipe,
@@ -1785,6 +2195,7 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
       bootstrapUnifiedTimeline,
       loadOlderMessages,
       sendMessage,
+      resolveCompletionCheck,
       retryMessage,
       syncMealSelection,
       setPrimaryRecipe,

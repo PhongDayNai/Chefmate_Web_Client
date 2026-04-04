@@ -58,6 +58,7 @@ export default function ChatPage() {
     canCompleteSession,
     canMutateMeal,
     canSendMessage,
+    composerPlaceholder,
     retryNow,
     highlightedRecipeId,
     loadingRecipes,
@@ -65,6 +66,7 @@ export default function ChatPage() {
     handleTimelineScroll,
     autoScrollTimeline,
     handleSend,
+    handleResolveCompletionCheck,
     handleRetryMessage,
     handleOpenRecipePicker,
     handleAddRecipeToMeal,
@@ -204,6 +206,9 @@ export default function ChatPage() {
                     message={msg}
                     retryNow={retryNow}
                     showAssistantLabel
+                    onCompletionCheckAction={(messageTempId, action) =>
+                      void handleResolveCompletionCheck(messageTempId, action)
+                    }
                     onRetry={(tempId) => void handleRetryMessage(tempId)}
                   />
                 </Fragment>
@@ -235,7 +240,7 @@ export default function ChatPage() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               disabled={!canSendMessage}
-              placeholder={state.mealSession.uiClosed ? "Phiên này đã hoàn tất. Hãy chọn món mới để tiếp tục." : "Nhắn Bepes..."}
+              placeholder={composerPlaceholder}
               className="h-9 flex-1 bg-transparent text-[15px] text-[#1f2937] outline-none placeholder:text-[#a1a7b6] disabled:cursor-not-allowed disabled:text-gray-400"
             />
             <button

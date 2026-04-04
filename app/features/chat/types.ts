@@ -3,6 +3,9 @@ export type ChatRole = "user" | "assistant" | "system";
 export type MealRecipeStatus = "pending" | "cooking" | "done" | "skipped";
 export type MealCompletionType = "completed" | "abandoned";
 export type MealRemainingStatus = "done" | "skipped" | null;
+export type CompletionCheckActionId = "mark_done" | "mark_skipped" | "continue_current";
+export type CompletionCheckStatus = "pending" | "loading" | "error";
+export type CompletionCheckMessageStatus = CompletionCheckStatus | "resolved";
 
 export interface ChatSession {
   chatSessionId: number;
@@ -12,6 +15,35 @@ export interface ChatSession {
   createdAt?: string;
   updatedAt?: string;
 }
+
+export interface CompletionCheckAction {
+  id: CompletionCheckActionId;
+  label: string;
+}
+
+export interface CompletionCheckPayload {
+  recipeId: number;
+  recipeName: string;
+  minutesSinceLastMessage: number;
+  isStrongReminder: boolean;
+  reminderMessage: string;
+  pendingUserMessage?: string;
+  actions: CompletionCheckAction[];
+  countToday?: number;
+  dayKey?: string;
+  cooldownMinutes?: number;
+}
+
+export interface CompletionCheckMessageMeta {
+  flow: "meal_v2";
+  completionCheck: true;
+  status: CompletionCheckMessageStatus;
+  actions: CompletionCheckAction[];
+  selectedActionId?: CompletionCheckActionId;
+  selectedActionLabel?: string;
+}
+
+export type ChatMessageMeta = Record<string, unknown> & Partial<CompletionCheckMessageMeta>;
 
 export interface ChatMessage {
   chatMessageId?: number;
@@ -23,7 +55,7 @@ export interface ChatMessage {
   isSessionStart?: boolean;
   role: ChatRole;
   content: string;
-  meta?: Record<string, unknown> | null;
+  meta?: ChatMessageMeta | null;
   createdAt: string;
   isPending?: boolean;
   isFailed?: boolean;
@@ -116,6 +148,17 @@ export interface MealSnapshot {
   mealItems: MealItem[];
 }
 
+export interface PendingCompletionCheckState {
+  chatSessionId: number;
+  recipeId: number;
+  pendingUserMessage: string;
+  userTempId: string;
+  reminderMessage: string;
+  actions: CompletionCheckAction[];
+  messageTempId: string;
+  status: CompletionCheckStatus;
+}
+
 export interface ChatUiState {
   currentSessionId: number | null;
   currentSession: ChatSession | null;
@@ -139,6 +182,7 @@ export interface ChatUiState {
   mealSession: MealSessionState;
   mealItems: MealItem[];
   pendingPrimarySwitch: PendingPrimarySwitch | null;
+  pendingCompletionCheck: PendingCompletionCheckState | null;
   mealSyncing: boolean;
 }
 
@@ -188,4 +232,12 @@ export interface CompleteMealSessionPayload {
   completionType?: MealCompletionType;
   note?: string | null;
   markRemainingStatus?: MealRemainingStatus;
+}
+
+export interface ResolveCompletionCheckPayload {
+  chatSessionId: number;
+  action: CompletionCheckActionId;
+  pendingUserMessage?: string;
+  nextPrimaryRecipeId?: number | null;
+  model?: string;
 }

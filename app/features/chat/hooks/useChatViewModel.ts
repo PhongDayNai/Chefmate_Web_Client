@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
 import type {
   ChatRecommendation,
+  CompletionCheckActionId,
   DietNote,
   DietNoteType,
   MealCompletionType,
@@ -86,6 +87,7 @@ export function useChatViewModel({
     getUserId,
     bootstrapUnifiedTimeline,
     sendMessage,
+    resolveCompletionCheck,
     retryMessage,
     loadOlderMessages,
     refreshRecommendations,
@@ -164,7 +166,17 @@ export function useChatViewModel({
     state.mealSession.chatSessionId && !state.mealSession.uiClosed && !state.mealSyncing && !state.sending,
   );
   const canMutateMeal = Boolean(!state.mealSyncing && !state.sending);
-  const canSendMessage = Boolean(!state.mealSession.uiClosed && !state.sending);
+  const hasBlockingCompletionCheck = Boolean(
+    state.pendingCompletionCheck && state.pendingCompletionCheck.status !== "error",
+  );
+  const canSendMessage = Boolean(!state.mealSession.uiClosed && !state.sending && !hasBlockingCompletionCheck);
+  const composerPlaceholder = state.mealSession.uiClosed
+    ? "Phiên này đã hoàn tất. Hãy chọn món mới để tiếp tục."
+    : state.pendingCompletionCheck?.status === "loading"
+      ? "Bepes đang xử lý xác nhận món hiện tại..."
+      : state.pendingCompletionCheck?.status === "pending"
+        ? "Xác nhận trạng thái món hiện tại để tiếp tục chat."
+        : "Nhắn Bepes...";
 
   const selectedRecipeEntries = useMemo(
     () =>
@@ -306,6 +318,15 @@ export function useChatViewModel({
       await retryMessage(tempId);
     },
     [ensureUserId, retryMessage],
+  );
+
+  const handleResolveCompletionCheck = useCallback(
+    async (messageTempId: string, action: CompletionCheckActionId) => {
+      const uid = ensureUserId();
+      if (!uid) return;
+      await resolveCompletionCheck({ messageTempId, action });
+    },
+    [ensureUserId, resolveCompletionCheck],
   );
 
   const handleOpenRecipePicker = useCallback(async () => {
@@ -544,6 +565,7 @@ export function useChatViewModel({
     canCompleteSession,
     canMutateMeal,
     canSendMessage,
+    composerPlaceholder,
     retryNow,
     highlightedRecipeId,
     loadingRecipes,
@@ -551,6 +573,7 @@ export function useChatViewModel({
     handleTimelineScroll,
     autoScrollTimeline,
     handleSend,
+    handleResolveCompletionCheck,
     handleRetryMessage,
     handleOpenRecipePicker,
     handleAddRecipeToMeal,

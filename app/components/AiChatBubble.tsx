@@ -64,6 +64,7 @@ export default function AiChatBubble() {
     canCompleteSession,
     canMutateMeal,
     canSendMessage,
+    composerPlaceholder,
     retryNow,
     highlightedRecipeId,
     loadingRecipes,
@@ -71,6 +72,7 @@ export default function AiChatBubble() {
     handleTimelineScroll,
     autoScrollTimeline,
     handleSend,
+    handleResolveCompletionCheck,
     handleRetryMessage,
     handleOpenRecipePicker,
     handleAddRecipeToMeal,
@@ -273,6 +275,9 @@ export default function AiChatBubble() {
                       message={msg}
                       compact
                       retryNow={retryNow}
+                      onCompletionCheckAction={(messageTempId, action) =>
+                        void handleResolveCompletionCheck(messageTempId, action)
+                      }
                       onRetry={(tempId) => void handleRetryMessage(tempId)}
                     />
                   </Fragment>
@@ -304,7 +309,7 @@ export default function AiChatBubble() {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 disabled={!canSendMessage}
-                placeholder={state.mealSession.uiClosed ? "Phiên này đã hoàn tất. Hãy chọn món mới để tiếp tục." : "Hỏi Bepes công thức nấu ăn..."}
+                placeholder={composerPlaceholder}
                 className="w-full rounded-2xl border-2 border-transparent bg-white p-3.5 pr-14 text-sm font-medium text-gray-900 shadow-sm outline-none transition-all focus:border-orange-200 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400 sm:p-4 sm:pr-14"
               />
               <button
