@@ -186,7 +186,7 @@ export default function AiChatBubble() {
   if (pathname === "/chat") return null;
 
   return (
-    <div className="fixed inset-x-2 bottom-2 z-[100] flex flex-col items-end gap-3 sm:inset-x-auto sm:bottom-6 sm:right-6 sm:gap-4">
+    <div className="pointer-events-none fixed inset-x-2 bottom-2 z-[100] flex flex-col items-end gap-3 sm:inset-x-auto sm:bottom-6 sm:right-6 sm:gap-4">
       {isBubbleRendered ? (
         <div
           onWheel={handleBubbleWheel}
@@ -194,7 +194,7 @@ export default function AiChatBubble() {
             width: "min(100%, 420px)",
             height: "min(750px, calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 6.5rem))",
           }}
-          className={`flex flex-col overflow-hidden rounded-[2rem] border border-gray-100 bg-white shadow-2xl transition-all duration-300 ease-out sm:rounded-[2.5rem] md:w-[420px] ${
+          className={`pointer-events-auto flex flex-col overflow-hidden rounded-[2rem] border border-gray-100 bg-white shadow-2xl transition-all duration-300 ease-out sm:rounded-[2.5rem] md:w-[420px] ${
             isOpen ? "translate-y-0 scale-100 opacity-100" : "pointer-events-none translate-y-6 scale-95 opacity-0"
           }`}
         >
@@ -330,7 +330,7 @@ export default function AiChatBubble() {
 
       <button
         onClick={toggleChat}
-        className={`relative z-[101] mr-1 flex h-16 w-16 transform items-center justify-center rounded-full text-white shadow-2xl transition-all duration-300 hover:scale-110 active:scale-95 sm:mr-0 ${
+        className={`pointer-events-auto relative z-[101] mr-1 flex h-16 w-16 transform items-center justify-center rounded-full text-white shadow-2xl transition-all duration-300 hover:scale-110 active:scale-95 sm:mr-0 ${
           isOpen ? "rotate-180 bg-[#ea6f12]" : "bg-[#f59127]"
         }`}
         type="button"
@@ -338,51 +338,53 @@ export default function AiChatBubble() {
         {isOpen ? <X size={28} /> : <Bot size={32} />}
       </button>
 
-      <MealPickerDialog
-        isOpen={showRecipePicker}
-        compact
-        mealItems={state.mealSession.uiClosed ? [] : state.mealItems}
-        recommendationGroups={recommendationGroups}
-        activeRecipeId={state.mealSession.activeRecipeId}
-        highlightedRecipeId={highlightedRecipeId}
-        isLocked={false}
-        isSaving={state.mealSyncing}
-        onClose={() => setShowRecipePicker(false)}
-        onAddRecipe={(item) => void handleAddRecipeToMeal(item)}
-        onRemoveRecipe={(recipeId) => void handleRemoveMealRecipe(recipeId)}
-        onMoveRecipe={(recipeId, direction) => void handleMoveMealRecipe(recipeId, direction)}
-        onSetPrimaryRecipe={(recipeId) => void handleSetPrimaryRecipe(recipeId)}
-        onChangeStatus={(recipeId, status) => void handleChangeMealStatus(recipeId, status)}
-      />
+      <div className="pointer-events-auto">
+        <MealPickerDialog
+          isOpen={showRecipePicker}
+          compact
+          mealItems={state.mealSession.uiClosed ? [] : state.mealItems}
+          recommendationGroups={recommendationGroups}
+          activeRecipeId={state.mealSession.activeRecipeId}
+          highlightedRecipeId={highlightedRecipeId}
+          isLocked={false}
+          isSaving={state.mealSyncing}
+          onClose={() => setShowRecipePicker(false)}
+          onAddRecipe={(item) => void handleAddRecipeToMeal(item)}
+          onRemoveRecipe={(recipeId) => void handleRemoveMealRecipe(recipeId)}
+          onMoveRecipe={(recipeId, direction) => void handleMoveMealRecipe(recipeId, direction)}
+          onSetPrimaryRecipe={(recipeId) => void handleSetPrimaryRecipe(recipeId)}
+          onChangeStatus={(recipeId, status) => void handleChangeMealStatus(recipeId, status)}
+        />
 
-      <SelectedRecipesDialog
-        isOpen={showRecipeDialog}
-        compact
-        loading={loadingRecipes}
-        entries={selectedRecipeEntries}
-        onClose={() => setShowRecipeDialog(false)}
-        onOpenRecipe={handleOpenRecipeFromDialog}
-      />
+        <SelectedRecipesDialog
+          isOpen={showRecipeDialog}
+          compact
+          loading={loadingRecipes}
+          entries={selectedRecipeEntries}
+          onClose={() => setShowRecipeDialog(false)}
+          onOpenRecipe={handleOpenRecipeFromDialog}
+        />
 
-      <PendingPrimarySwitchDialog
-        isOpen={Boolean(state.pendingPrimarySwitch)}
-        pendingSwitch={state.pendingPrimarySwitch}
-        mealItems={state.mealItems}
-        loading={state.mealSyncing}
-        onClose={handleClosePendingPrimarySwitch}
-        onConfirm={(recipeId) => void handleConfirmPendingPrimarySwitch(recipeId)}
-      />
+        <PendingPrimarySwitchDialog
+          isOpen={Boolean(state.pendingPrimarySwitch)}
+          pendingSwitch={state.pendingPrimarySwitch}
+          mealItems={state.mealItems}
+          loading={state.mealSyncing}
+          onClose={handleClosePendingPrimarySwitch}
+          onConfirm={(recipeId) => void handleConfirmPendingPrimarySwitch(recipeId)}
+        />
 
-      <CompleteMealDialog
-        isOpen={showCompleteDialog}
-        compact
-        loading={state.mealSyncing}
-        onClose={() => setShowCompleteDialog(false)}
-        onSubmit={(payload) => void handleConfirmCompleteSession(payload)}
-      />
+        <CompleteMealDialog
+          isOpen={showCompleteDialog}
+          compact
+          loading={state.mealSyncing}
+          onClose={() => setShowCompleteDialog(false)}
+          onSubmit={(payload) => void handleConfirmCompleteSession(payload)}
+        />
+      </div>
 
       {showDietModal ? (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/40 p-4">
+        <div className="pointer-events-auto fixed inset-0 z-[110] flex items-center justify-center bg-black/40 p-4">
           <div className="flex max-h-[78vh] w-full max-w-lg flex-col overflow-hidden rounded-3xl bg-white shadow-2xl">
             <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4">
               <h3 className="text-lg font-black text-gray-900">Ghi chú ăn uống</h3>
