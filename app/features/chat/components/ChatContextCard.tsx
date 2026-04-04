@@ -51,23 +51,23 @@ export default function ChatContextCard({
 }: Props) {
   const baseButtonClass = compact
     ? "rounded-xl px-2 py-2 text-[11px] font-black transition hover:brightness-95"
-    : "rounded-full px-5 py-3.5 text-lg font-black transition hover:brightness-95";
+    : "rounded-[1rem] px-3 py-2.5 text-[14px] font-black transition hover:brightness-95 sm:rounded-[1.1rem] sm:px-3.5 sm:py-2.5 sm:text-[15px]";
 
-  const compactQuickActionClass =
-    "flex h-9 w-9 items-center justify-center rounded-full border bg-white shadow-sm transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-50";
+  const quickActionClass =
+    "flex h-8 w-8 items-center justify-center rounded-full border bg-white shadow-sm transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-50";
 
   return (
-    <div className={`rounded-2xl border border-[#efe3d1] bg-[#fbf3e7] ${compact ? "p-2.5" : "rounded-[1.8rem] p-3 sm:p-4"}`}>
+    <div className={`rounded-2xl border border-[#efe3d1] bg-[#fbf3e7] ${compact ? "p-2.5" : "rounded-[1.45rem] p-3"}`}>
       <div className="flex items-start justify-between gap-2.5 sm:gap-3">
         <div className="min-w-0 flex-1">
-          <p className={`${compact ? "text-[11px]" : "text-base sm:text-[18px]"} truncate font-semibold leading-snug text-gray-700`}>
+          <p className={`${compact ? "text-[11px]" : "text-[14px] sm:text-[15px]"} truncate font-semibold leading-snug text-gray-700`}>
             Món đang chọn: <span className="font-black text-gray-900">{activeRecipeLabel}</span>
           </p>
-          <p className={`${compact ? "mt-0.5 text-[11px]" : "mt-1 text-sm sm:text-base"} truncate font-semibold leading-snug text-gray-700`}>
+          <p className={`${compact ? "mt-0.5 text-[11px]" : "mt-1 text-[12px] sm:text-[13px]"} truncate font-semibold leading-snug text-gray-700`}>
             Ghi chú: <span className="font-black text-gray-900">{dietSummary}</span>
           </p>
 
-          <div className={`mt-2 flex flex-wrap items-center gap-1.5 ${compact ? "text-[10px]" : "text-[11px] sm:text-xs"}`}>
+          <div className={`mt-2 flex flex-wrap items-center gap-1.5 ${compact ? "text-[10px]" : "text-[11px]"}`}>
             {!uiClosed ? (
               <span className="inline-flex items-center gap-1 rounded-full bg-white/80 px-2.5 py-1 font-bold text-gray-600">
                 <Soup size={compact ? 12 : 13} /> {mealCount} món
@@ -90,7 +90,7 @@ export default function ChatContextCard({
           type="button"
           onClick={onToggleActions}
           className={`flex flex-shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-500 hover:border-[#f59127] hover:text-[#f59127] ${
-            compact ? "h-8 w-8" : "h-9 w-9 rounded-xl"
+            compact ? "h-8 w-8" : "h-8 w-8 rounded-lg"
           }`}
           title={showActions ? "Ẩn thao tác" : "Hiện thao tác"}
         >
@@ -100,41 +100,41 @@ export default function ChatContextCard({
         </button>
       </div>
 
-      {compact && !showActions ? (
+      {!showActions ? (
         <div className="mt-2 flex items-center gap-2">
           <button
             type="button"
             disabled={!canMutateMeal}
             onClick={onOpenMealPicker}
-            className={`${compactQuickActionClass} ${quickActionClassName("warm")}`}
+            className={`${quickActionClass} ${quickActionClassName("warm")}`}
             title="Chọn món"
           >
-            <UtensilsCrossed size={16} />
+            <UtensilsCrossed size={14} />
           </button>
           <button
             type="button"
             onClick={onOpenDietNotes}
-            className={`${compactQuickActionClass} ${quickActionClassName("cool")}`}
+            className={`${quickActionClass} ${quickActionClassName("cool")}`}
             title="Ghi chú"
           >
-            <NotebookPen size={16} />
+            <NotebookPen size={14} />
           </button>
           <button
             type="button"
             onClick={onOpenRecipes}
-            className={`${compactQuickActionClass} ${quickActionClassName("violet")}`}
+            className={`${quickActionClass} ${quickActionClassName("violet")}`}
             title="Công thức"
           >
-            <BookOpenText size={16} />
+            <BookOpenText size={14} />
           </button>
           <button
             type="button"
             disabled={!canComplete}
             onClick={onOpenComplete}
-            className={`${compactQuickActionClass} ${quickActionClassName("green")}`}
+            className={`${quickActionClass} ${quickActionClassName("green")}`}
             title="Hoàn thành"
           >
-            <CheckCircle2 size={16} />
+            <CheckCircle2 size={14} />
           </button>
         </div>
       ) : null}
@@ -144,7 +144,7 @@ export default function ChatContextCard({
           showActions
             ? compact
               ? "mt-2.5 max-h-28 opacity-100"
-              : "mt-4 max-h-48 opacity-100"
+              : "mt-2.5 max-h-28 opacity-100"
             : "pointer-events-none mt-0 max-h-0 opacity-0"
         }`}
       >

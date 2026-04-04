@@ -112,9 +112,9 @@ export default function ChatPage() {
   }, [autoScrollTimeline, state.sending, state.timeline]);
 
   return (
-    <div className="flex h-[calc(100vh-64px)] justify-center bg-[#f3f3f5] px-1.5 py-1.5 sm:px-4 sm:py-4">
-      <section className="relative flex h-full w-full max-w-4xl flex-col overflow-hidden rounded-[1.6rem] bg-[#f3f3f5] shadow-sm sm:rounded-[2rem]">
-        <div className="rounded-[1.4rem] bg-gradient-to-r from-[#ff7a16] via-[#f69035] to-[#ffb467] px-3 py-3 text-white shadow-md sm:rounded-[1.8rem] sm:px-5 sm:py-4">
+    <div className="flex h-[calc(100vh-64px)] justify-center bg-[#f3f3f5] px-1.5 py-1.5 sm:px-3 sm:py-3">
+      <section className="relative flex h-full w-full max-w-[900px] flex-col overflow-hidden rounded-[1.6rem] bg-[#f3f3f5] shadow-sm sm:rounded-[1.8rem]">
+        <div className="rounded-[1.3rem] bg-gradient-to-r from-[#ff7a16] via-[#f69035] to-[#ffb467] px-3 py-3 text-white shadow-md sm:rounded-[1.5rem] sm:px-4 sm:py-3.5">
           <div className="flex items-center gap-2.5 sm:gap-3">
             <button
               type="button"
@@ -125,11 +125,11 @@ export default function ChatPage() {
               <ChevronLeft size={16} />
             </button>
 
-            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-white/20 sm:h-10 sm:w-10">
+            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-white/20 sm:h-9 sm:w-9">
               <Bot size={20} />
             </div>
             <div>
-              <h1 className="text-[24px] font-black leading-none tracking-tight sm:text-3xl">Bepes</h1>
+              <h1 className="text-[24px] font-black leading-none tracking-tight sm:text-[2rem]">Bepes</h1>
               <p className="mt-0.5 text-[11px] font-semibold text-white/80 sm:mt-1 sm:text-xs">Trợ lý nấu ăn theo tủ lạnh và khẩu vị</p>
             </div>
           </div>
@@ -137,7 +137,7 @@ export default function ChatPage() {
 
         <div className="px-3 pt-3 sm:px-4 sm:pt-4">{!isLoggedIn ? <NeedLoginCard /> : null}</div>
 
-        <div className="px-3 pt-2.5 sm:px-4 sm:pt-3">
+        <div className="px-3 pt-2.5 sm:px-4 sm:pt-2.5">
           <ChatContextCard
             activeRecipeLabel={activeRecipeLabel}
             dietSummary={dietSummary}
@@ -155,7 +155,7 @@ export default function ChatPage() {
           />
         </div>
 
-        <div ref={timelineRef} className="custom-scrollbar flex-1 overflow-y-auto px-3 pb-2.5 pt-3 sm:px-4 sm:pb-3 sm:pt-4">
+        <div ref={timelineRef} className="custom-scrollbar flex-1 overflow-y-auto px-3 pb-2 pt-2.5 sm:px-3.5 sm:pb-2.5 sm:pt-3">
           {state.loadingTimeline && state.timeline.length > 0 ? (
             <div className="mb-3 flex justify-center">
               <Loader2 className="h-5 w-5 animate-spin text-[#f59127]" />
@@ -180,7 +180,7 @@ export default function ChatPage() {
             </div>
           ) : null}
 
-          <div className="space-y-4 pb-2">
+          <div className="space-y-3 pb-2">
             {state.timeline.map((msg, index) => {
               const renderKey = msg.chatMessageId
                 ? `session:${msg.chatSessionId ?? "none"}:message:${msg.chatMessageId}`
@@ -193,7 +193,7 @@ export default function ChatPage() {
               return (
                 <Fragment key={renderKey}>
                   {showSessionDivider ? (
-                    <div className="flex items-center gap-3 py-1">
+                    <div className="flex items-center gap-3 py-0.5">
                       <div className="h-px flex-1 bg-[#d7dde5]" />
                       <span className="text-[11px] font-semibold text-[#9ca3af]">{sessionTimeLabel}</span>
                       <div className="h-px flex-1 bg-[#d7dde5]" />
@@ -211,11 +211,11 @@ export default function ChatPage() {
             })}
 
             {state.sending ? (
-              <div className="flex gap-3">
-                <div className="mt-1 flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full border border-[#ebd7b8] bg-[#fff4e3] text-[#f57a14]">
-                  <Loader2 size={15} className="animate-spin" />
+              <div className="flex gap-2.5">
+                <div className="mt-1 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full border border-[#ebd7b8] bg-[#fff4e3] text-[#f57a14]">
+                  <Loader2 size={13} className="animate-spin" />
                 </div>
-                <div className="rounded-[1.6rem] rounded-tl-md border border-[#ebd9c3] bg-[#f7e7cf] px-4 py-3 text-base font-medium italic text-[#7b7f8a]">
+                <div className="rounded-[1.35rem] rounded-tl-md border border-[#ebd9c3] bg-[#f7e7cf] px-3.5 py-2.5 text-sm font-medium italic text-[#7b7f8a]">
                   Bepes đang soạn phản hồi...
                 </div>
               </div>
@@ -223,27 +223,27 @@ export default function ChatPage() {
           </div>
         </div>
 
-        <div className="bg-[#f3f3f5] px-4 pb-4 pt-2">
+        <div className="bg-[#f3f3f5] px-3.5 pb-3.5 pt-1.5">
           <form
             onSubmit={(e) => {
               e.preventDefault();
               void handleSend();
             }}
-            className="mx-auto flex max-w-4xl items-center gap-3 rounded-[2.2rem] border border-[#e4e6ed] bg-white p-2 pl-5 shadow-lg"
+            className="mx-auto flex max-w-4xl items-center gap-2 rounded-[1.8rem] border border-[#e4e6ed] bg-white p-1.5 pl-4 shadow-lg"
           >
             <input
               value={input}
               onChange={(e) => setInput(e.target.value)}
               disabled={!canSendMessage}
               placeholder={state.mealSession.uiClosed ? "Phiên này đã hoàn tất. Hãy chọn món mới để tiếp tục." : "Nhắn Bepes..."}
-              className="h-11 flex-1 bg-transparent text-[18px] text-[#1f2937] outline-none placeholder:text-[#a1a7b6] disabled:cursor-not-allowed disabled:text-gray-400"
+              className="h-9 flex-1 bg-transparent text-[15px] text-[#1f2937] outline-none placeholder:text-[#a1a7b6] disabled:cursor-not-allowed disabled:text-gray-400"
             />
             <button
               type="submit"
               disabled={state.sending || !input.trim() || !isLoggedIn || !canSendMessage}
-              className="flex h-12 w-12 items-center justify-center rounded-full bg-[#ff7a16] text-white transition hover:bg-[#ea6f12] disabled:cursor-not-allowed disabled:opacity-45"
+              className="flex h-10 w-10 items-center justify-center rounded-full bg-[#ff7a16] text-white transition hover:bg-[#ea6f12] disabled:cursor-not-allowed disabled:opacity-45"
             >
-              <Send size={19} />
+              <Send size={16} />
             </button>
           </form>
         </div>
@@ -251,6 +251,7 @@ export default function ChatPage() {
 
       <MealPickerDialog
         isOpen={showRecipePicker}
+        compact
         mealItems={state.mealSession.uiClosed ? [] : state.mealItems}
         recommendationGroups={recommendationGroups}
         activeRecipeId={state.mealSession.activeRecipeId}

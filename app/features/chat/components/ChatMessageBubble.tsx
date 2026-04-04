@@ -30,24 +30,24 @@ export default function ChatMessageBubble({
   const canRetry = Boolean(message.tempId && message.retryable && retryCountdown <= 0 && !message.isPending);
 
   return (
-    <div className={`flex gap-3 ${isUser ? "flex-row-reverse" : ""}`}>
+    <div className={`flex gap-2.5 ${isUser ? "flex-row-reverse" : ""}`}>
       <div
         className={`mt-1 flex flex-shrink-0 items-center justify-center rounded-xl border shadow-sm ${
-          compact ? "h-8 w-8" : "h-9 w-9"
+          compact ? "h-8 w-8" : "h-8 w-8"
         } ${
           isUser
             ? "border-[#e07d16] bg-[#ff8f2a] text-white"
             : "border-orange-100 bg-orange-50 text-[#f59127]"
         }`}
       >
-        {isUser ? <UserIcon size={compact ? 14 : 15} /> : <Bot size={compact ? 14 : 15} />}
+        {isUser ? <UserIcon size={compact ? 14 : 13} /> : <Bot size={compact ? 14 : 13} />}
       </div>
 
       <div
         className={`max-w-[85%] whitespace-pre-wrap shadow-sm ${
           compact
             ? "rounded-2xl p-4 text-sm leading-relaxed font-medium"
-            : "rounded-[1.6rem] px-4 py-3 text-[19px] leading-relaxed"
+            : "rounded-[1.35rem] px-3.5 py-2.5 text-[14px] leading-[1.6]"
         } ${
           isUser
             ? "rounded-tr-none bg-[#ff8f2a] text-white"
@@ -57,13 +57,13 @@ export default function ChatMessageBubble({
         } ${message.isPending ? "opacity-80" : ""} ${message.isFailed ? "ring-2 ring-red-200" : ""}`}
       >
         {!compact && !isUser && showAssistantLabel ? (
-          <p className="mb-1 text-2xl font-black text-[#f57a14]">Bepes</p>
+          <p className="mb-1 text-[16px] font-black text-[#f57a14]">Bepes</p>
         ) : null}
 
         <ChatMessageContent role={message.role} content={message.content} />
 
         {message.isPending && !isUser ? (
-          <div className={`mt-3 inline-flex items-center gap-2 ${isUser ? "text-white/85" : "text-[#7b7f8a]"}`}>
+          <div className={`mt-2 inline-flex items-center gap-2 ${isUser ? "text-white/85" : "text-[#7b7f8a]"}`}>
             <Loader2 size={compact ? 13 : 14} className="animate-spin" />
             <span className={compact ? "text-xs font-semibold" : "text-sm font-semibold"}>Đang gửi...</span>
           </div>
