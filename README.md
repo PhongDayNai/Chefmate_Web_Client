@@ -2,6 +2,10 @@
 
 Ứng dụng web BEPTROLY đã được migrate sang **Next.js App Router**.
 
+## Website production
+
+- https://chefmate.phongdaynai.id.vn
+
 ## Yêu cầu
 
 - Node.js 20+
