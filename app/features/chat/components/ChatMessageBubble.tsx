@@ -3,9 +3,9 @@
 import { Bot, Loader2, RotateCcw, User as UserIcon } from "lucide-react";
 import type {
   ChatMessage,
-  CompletionCheckAction,
-  CompletionCheckActionId,
-  CompletionCheckMessageMeta,
+  MealPolicyPromptAction,
+  MealPolicyPromptActionId,
+  MealPolicyPromptMessageMeta,
 } from "~/features/chat/types";
 import ChatMessageContent from "~/features/chat/components/ChatMessageContent";
 
@@ -15,7 +15,7 @@ interface Props {
   retryNow: number;
   showAssistantLabel?: boolean;
   onRetry?: (tempId: string) => void;
-  onCompletionCheckAction?: (messageTempId: string, action: CompletionCheckActionId) => void;
+  onMealPolicyPromptAction?: (messageTempId: string, action: MealPolicyPromptActionId) => void;
 }
 
 function getRetryCountdown(message: ChatMessage, retryNow: number): number {
@@ -24,42 +24,51 @@ function getRetryCountdown(message: ChatMessage, retryNow: number): number {
   return waitMs > 0 ? Math.ceil(waitMs / 1000) : 0;
 }
 
-function normalizeCompletionCheckActions(raw: unknown): CompletionCheckAction[] {
+function normalizeMealPolicyPromptActions(raw: unknown): MealPolicyPromptAction[] {
   if (!Array.isArray(raw)) return [];
 
   return raw.filter(
-    (item): item is CompletionCheckAction =>
+    (item): item is MealPolicyPromptAction =>
       Boolean(item) &&
       typeof item === "object" &&
-      (item as CompletionCheckAction).id !== undefined &&
-      ((item as CompletionCheckAction).id === "mark_done" ||
-        (item as CompletionCheckAction).id === "mark_skipped" ||
-        (item as CompletionCheckAction).id === "continue_current") &&
-      typeof (item as CompletionCheckAction).label === "string" &&
-      Boolean((item as CompletionCheckAction).label.trim()),
+      (item as MealPolicyPromptAction).id !== undefined &&
+      ((item as MealPolicyPromptAction).id === "mark_done" ||
+        (item as MealPolicyPromptAction).id === "mark_skipped" ||
+        (item as MealPolicyPromptAction).id === "continue_current" ||
+        (item as MealPolicyPromptAction).id === "complete_session" ||
+        (item as MealPolicyPromptAction).id === "keep_session_open") &&
+      typeof (item as MealPolicyPromptAction).label === "string" &&
+      Boolean((item as MealPolicyPromptAction).label.trim()),
   );
 }
 
-function getCompletionCheckMeta(message: ChatMessage): CompletionCheckMessageMeta | null {
-  if (!message.meta || message.meta.completionCheck !== true || message.meta.flow !== "meal_v2") return null;
+function getMealPolicyPromptMeta(message: ChatMessage): MealPolicyPromptMessageMeta | null {
+  if (!message.meta || message.meta.mealPolicyPrompt !== true || message.meta.flow !== "meal_v2") return null;
 
   const status = message.meta.status;
   if (status !== "pending" && status !== "loading" && status !== "error" && status !== "resolved") {
     return null;
   }
 
-  const actions = normalizeCompletionCheckActions(message.meta.actions);
+  const actions = normalizeMealPolicyPromptActions(message.meta.actions);
   if (!actions.length) return null;
 
   return {
     flow: "meal_v2",
-    completionCheck: true,
+    mealPolicyPrompt: true,
+    promptCode:
+      message.meta.promptCode === "PENDING_MEAL_V2_COMPLETION_CHECK" ||
+      message.meta.promptCode === "MEAL_SESSION_READY_TO_COMPLETE"
+        ? message.meta.promptCode
+        : "PENDING_MEAL_V2_COMPLETION_CHECK",
     status,
     actions,
     selectedActionId:
       message.meta.selectedActionId === "mark_done" ||
       message.meta.selectedActionId === "mark_skipped" ||
-      message.meta.selectedActionId === "continue_current"
+      message.meta.selectedActionId === "continue_current" ||
+      message.meta.selectedActionId === "complete_session" ||
+      message.meta.selectedActionId === "keep_session_open"
         ? message.meta.selectedActionId
         : undefined,
     selectedActionLabel:
@@ -67,12 +76,14 @@ function getCompletionCheckMeta(message: ChatMessage): CompletionCheckMessageMet
   };
 }
 
-function actionClassName(actionId: CompletionCheckActionId, disabled: boolean, active: boolean): string {
+function actionClassName(actionId: MealPolicyPromptActionId, disabled: boolean, active: boolean): string {
   if (disabled && active) return "border-emerald-300 bg-emerald-100 text-emerald-800";
   if (disabled) return "border-[#ebd9c3] bg-white/70 text-[#9a835f]";
   if (actionId === "mark_done") return "border-[#f5b778] bg-[#ffedd6] text-[#b45309] hover:bg-[#ffe3bf]";
   if (actionId === "mark_skipped") return "border-[#d8dce6] bg-[#f4f5f8] text-[#4b5563] hover:bg-[#ebeef3]";
-  return "border-[#b9d7c2] bg-[#e8f5ec] text-[#17603a] hover:bg-[#d9f0e0]";
+  if (actionId === "continue_current") return "border-[#b9d7c2] bg-[#e8f5ec] text-[#17603a] hover:bg-[#d9f0e0]";
+  if (actionId === "complete_session") return "border-[#cbd5ff] bg-[#e8edff] text-[#3047a7] hover:bg-[#dce4ff]";
+  return "border-[#d7d2ff] bg-[#f1edff] text-[#5a43a7] hover:bg-[#e7e0ff]";
 }
 
 export default function ChatMessageBubble({
@@ -81,14 +92,14 @@ export default function ChatMessageBubble({
   retryNow,
   showAssistantLabel = false,
   onRetry,
-  onCompletionCheckAction,
+  onMealPolicyPromptAction,
 }: Props) {
   const isUser = message.role === "user";
   const retryCountdown = getRetryCountdown(message, retryNow);
   const canRetry = Boolean(message.tempId && message.retryable && retryCountdown <= 0 && !message.isPending);
-  const completionCheckMeta = !isUser ? getCompletionCheckMeta(message) : null;
-  const completionCheckDisabled =
-    !message.tempId || completionCheckMeta?.status === "loading" || completionCheckMeta?.status === "resolved";
+  const mealPolicyPromptMeta = !isUser ? getMealPolicyPromptMeta(message) : null;
+  const mealPolicyPromptDisabled =
+    !message.tempId || mealPolicyPromptMeta?.status === "loading" || mealPolicyPromptMeta?.status === "resolved";
 
   return (
     <div className={`flex gap-2.5 ${isUser ? "flex-row-reverse" : ""}`}>
@@ -123,44 +134,44 @@ export default function ChatMessageBubble({
 
         <ChatMessageContent role={message.role} content={message.content} />
 
-        {completionCheckMeta ? (
+        {mealPolicyPromptMeta ? (
           <div className="mt-3 space-y-2">
             <div className="flex flex-wrap gap-2">
-              {completionCheckMeta.actions.map((action) => {
-                const isSelected = completionCheckMeta.selectedActionId === action.id;
+              {mealPolicyPromptMeta.actions.map((action) => {
+                const isSelected = mealPolicyPromptMeta.selectedActionId === action.id;
                 return (
                   <button
                     key={action.id}
                     type="button"
-                    disabled={completionCheckDisabled}
+                    disabled={mealPolicyPromptDisabled}
                     onClick={() => {
                       if (!message.tempId) return;
-                      onCompletionCheckAction?.(message.tempId, action.id);
+                      onMealPolicyPromptAction?.(message.tempId, action.id);
                     }}
                     className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-black transition disabled:cursor-not-allowed ${actionClassName(
                       action.id,
-                      completionCheckDisabled,
+                      mealPolicyPromptDisabled,
                       isSelected,
                     )}`}
                   >
-                    {completionCheckMeta.status === "loading" ? <Loader2 size={12} className="animate-spin" /> : null}
+                    {mealPolicyPromptMeta.status === "loading" ? <Loader2 size={12} className="animate-spin" /> : null}
                     {action.label}
                   </button>
                 );
               })}
             </div>
 
-            {completionCheckMeta.status === "resolved" && completionCheckMeta.selectedActionLabel ? (
+            {mealPolicyPromptMeta.status === "resolved" && mealPolicyPromptMeta.selectedActionLabel ? (
               <p className="text-xs font-semibold text-emerald-700">
-                Đã chọn: {completionCheckMeta.selectedActionLabel}
+                Đã chọn: {mealPolicyPromptMeta.selectedActionLabel}
               </p>
             ) : null}
 
-            {completionCheckMeta.status === "loading" ? (
-              <p className="text-xs font-semibold text-[#7b7f8a]">Đang xử lý xác nhận món hiện tại...</p>
+            {mealPolicyPromptMeta.status === "loading" ? (
+              <p className="text-xs font-semibold text-[#7b7f8a]">Bepes đang xử lý lựa chọn của bạn...</p>
             ) : null}
 
-            {completionCheckMeta.status === "error" ? (
+            {mealPolicyPromptMeta.status === "error" ? (
               <p className="text-xs font-semibold text-amber-700">
                 Chưa xử lý được. Bạn có thể thử lại hoặc tiếp tục nhắn tay.
               </p>

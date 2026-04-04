@@ -19,13 +19,14 @@ import type {
   ChatSession,
   ChatUiState,
   CompleteMealSessionPayload,
-  CompletionCheckAction,
-  CompletionCheckActionId,
-  CompletionCheckMessageMeta,
-  CompletionCheckMessageStatus,
-  CompletionCheckPayload,
-  CompletionCheckStatus,
   DietNote,
+  MealPolicyPromptAction,
+  MealPolicyPromptActionId,
+  MealPolicyPromptCode,
+  MealPolicyPromptMessageMeta,
+  MealPolicyPromptMessageStatus,
+  MealPolicyPromptPayload,
+  MealPolicyPromptStatus,
   MealCompletionType,
   MealItem,
   MealRecipeStatus,
@@ -33,7 +34,7 @@ import type {
   MealSessionState,
   MealSnapshot,
   PantryItem,
-  PendingCompletionCheckState,
+  PendingMealPolicyPromptState,
   PendingPrimarySwitch,
 } from "~/features/chat/types";
 import { dietNoteService } from "~/features/users/api/dietNoteService";
@@ -48,7 +49,16 @@ const LAST_CHAT_SESSION_ID_KEY = "lastChatSessionId";
 const LAST_CHAT_USER_ID_KEY = "lastChatUserId";
 const MEAL_SNAPSHOT_KEY_PREFIX = "chatMealSnapshot";
 const LATEST_MEAL_SNAPSHOT_KEY_PREFIX = "chatMealLatestSession";
-const COMPLETION_CHECK_PENDING_CODE = "PENDING_MEAL_V2_COMPLETION_CHECK";
+const MEAL_POLICY_PROMPT_PENDING_CODE = "PENDING_MEAL_V2_COMPLETION_CHECK";
+const MEAL_POLICY_PROMPT_READY_TO_COMPLETE_CODE = "MEAL_SESSION_READY_TO_COMPLETE";
+
+const MEAL_POLICY_ACTION_LABELS: Record<MealPolicyPromptActionId, string> = {
+  mark_done: "Đã xong món này",
+  mark_skipped: "Bỏ qua món này",
+  continue_current: "Chưa xong, tiếp tục món này",
+  complete_session: "Kết thúc phiên này",
+  keep_session_open: "Giữ phiên mở",
+};
 
 type ChatAction =
   | { type: "MERGE"; payload: Partial<ChatUiState> }
@@ -84,7 +94,7 @@ const initialState: ChatUiState = {
   mealSession: initialMealSession,
   mealItems: [],
   pendingPrimarySwitch: null,
-  pendingCompletionCheck: null,
+  pendingMealPolicyPrompt: null,
   mealSyncing: false,
 };
 
@@ -112,9 +122,9 @@ interface UpdateMealStatusOptions {
   note?: string | null;
 }
 
-interface ResolveCompletionCheckOptions {
+interface ResolveMealPolicyPromptOptions {
   messageTempId: string;
-  action: CompletionCheckActionId;
+  action: MealPolicyPromptActionId;
 }
 
 interface ChatFlowContextValue {
@@ -130,7 +140,7 @@ interface ChatFlowContextValue {
   bootstrapUnifiedTimeline: () => Promise<void>;
   loadOlderMessages: () => Promise<void>;
   sendMessage: (message: string, options?: SendMessageOptions) => Promise<void>;
-  resolveCompletionCheck: (options: ResolveCompletionCheckOptions) => Promise<boolean>;
+  resolveMealPolicyPrompt: (options: ResolveMealPolicyPromptOptions) => Promise<boolean>;
   retryMessage: (tempId: string) => Promise<void>;
   syncMealSelection: (items: MealItem[]) => Promise<boolean>;
   setPrimaryRecipe: (recipeId: number | null) => Promise<boolean>;
@@ -265,12 +275,31 @@ function normalizeMessages(raw: any): ChatMessage[] {
     .filter((item: ChatMessage | null): item is ChatMessage => Boolean(item));
 }
 
-function normalizeCompletionCheckAction(raw: any): CompletionCheckAction | null {
+function normalizeMealPolicyPromptActionId(value: unknown): MealPolicyPromptActionId | null {
+  return value === "mark_done" ||
+    value === "mark_skipped" ||
+    value === "continue_current" ||
+    value === "complete_session" ||
+    value === "keep_session_open"
+    ? value
+    : null;
+}
+
+function normalizeMealPolicyPromptAction(raw: any): MealPolicyPromptAction | null {
+  if (typeof raw === "string") {
+    const id = normalizeMealPolicyPromptActionId(raw);
+    return id
+      ? {
+          id,
+          label: MEAL_POLICY_ACTION_LABELS[id],
+        }
+      : null;
+  }
+
   if (!raw || typeof raw !== "object") return null;
-  const id = raw.id;
-  if (id !== "mark_done" && id !== "mark_skipped" && id !== "continue_current") return null;
-  const label = typeof raw.label === "string" ? raw.label.trim() : "";
-  if (!label) return null;
+  const id = normalizeMealPolicyPromptActionId(raw.id);
+  if (!id) return null;
+  const label = typeof raw.label === "string" && raw.label.trim() ? raw.label.trim() : MEAL_POLICY_ACTION_LABELS[id];
 
   return {
     id,
@@ -278,37 +307,66 @@ function normalizeCompletionCheckAction(raw: any): CompletionCheckAction | null 
   };
 }
 
-function normalizeCompletionCheckPayload(raw: any): CompletionCheckPayload | null {
-  if (!raw || typeof raw !== "object") return null;
+function normalizeMealPolicyPromptPayload(payload: any, rawData: any): MealPolicyPromptPayload | null {
+  if (hasPendingMealPolicyPromptCode(payload)) {
+    const raw = rawData?.completionCheck;
+    if (!raw || typeof raw !== "object") return null;
 
-  const recipeId = Number(raw.recipeId);
-  const recipeName = typeof raw.recipeName === "string" ? raw.recipeName.trim() : "";
-  const reminderMessage = typeof raw.reminderMessage === "string" ? raw.reminderMessage.trim() : "";
-  const actions = Array.isArray(raw.actions)
-    ? raw.actions
-        .map((item: any) => normalizeCompletionCheckAction(item))
-        .filter((item: CompletionCheckAction | null): item is CompletionCheckAction => Boolean(item))
-    : [];
+    const reminderMessage = typeof raw.reminderMessage === "string" ? raw.reminderMessage.trim() : "";
+    const actions = Array.isArray(raw.actions)
+      ? raw.actions
+          .map((item: any) => normalizeMealPolicyPromptAction(item))
+          .filter((item: MealPolicyPromptAction | null): item is MealPolicyPromptAction => Boolean(item))
+      : [];
 
-  if (!Number.isFinite(recipeId) || recipeId <= 0 || !recipeName || !reminderMessage || !actions.length) {
-    return null;
+    if (!reminderMessage || !actions.length) return null;
+
+    return {
+      promptCode: MEAL_POLICY_PROMPT_PENDING_CODE,
+      reminderMessage,
+      pendingUserMessage:
+        typeof raw.pendingUserMessage === "string" && raw.pendingUserMessage.trim()
+          ? raw.pendingUserMessage.trim()
+          : undefined,
+      actions,
+      recipeId: raw.recipeId !== undefined && raw.recipeId !== null ? Number(raw.recipeId) : undefined,
+      recipeName: typeof raw.recipeName === "string" ? raw.recipeName.trim() : undefined,
+      minutesSinceLastMessage:
+        raw.minutesSinceLastMessage !== undefined && raw.minutesSinceLastMessage !== null
+          ? Number(raw.minutesSinceLastMessage)
+          : undefined,
+      isStrongReminder: raw.isStrongReminder !== undefined ? Boolean(raw.isStrongReminder) : undefined,
+      countToday: raw.countToday !== undefined && raw.countToday !== null ? Number(raw.countToday) : undefined,
+      dayKey: typeof raw.dayKey === "string" ? raw.dayKey : undefined,
+      cooldownMinutes: raw.cooldownMinutes !== undefined && raw.cooldownMinutes !== null ? Number(raw.cooldownMinutes) : undefined,
+    };
   }
 
-  return {
-    recipeId,
-    recipeName,
-    minutesSinceLastMessage: Number(raw.minutesSinceLastMessage ?? 0) || 0,
-    isStrongReminder: Boolean(raw.isStrongReminder),
-    reminderMessage,
-    pendingUserMessage:
-      typeof raw.pendingUserMessage === "string" && raw.pendingUserMessage.trim()
-        ? raw.pendingUserMessage.trim()
-        : undefined,
-    actions,
-    countToday: raw.countToday !== undefined && raw.countToday !== null ? Number(raw.countToday) : undefined,
-    dayKey: typeof raw.dayKey === "string" ? raw.dayKey : undefined,
-    cooldownMinutes: raw.cooldownMinutes !== undefined && raw.cooldownMinutes !== null ? Number(raw.cooldownMinutes) : undefined,
-  };
+  if (hasReadyToCompleteMealPolicyPromptCode(payload)) {
+    const reminderMessage =
+      typeof rawData?.assistantMessage === "string" && rawData.assistantMessage.trim()
+        ? rawData.assistantMessage.trim()
+        : "";
+    const actions = Array.isArray(rawData?.nextActions)
+      ? rawData.nextActions
+          .map((item: any) => normalizeMealPolicyPromptAction(item))
+          .filter((item: MealPolicyPromptAction | null): item is MealPolicyPromptAction => Boolean(item))
+      : [];
+
+    if (!reminderMessage || !actions.length) return null;
+
+    return {
+      promptCode: MEAL_POLICY_PROMPT_READY_TO_COMPLETE_CODE,
+      reminderMessage,
+      actions,
+      pendingUserMessage:
+        typeof rawData?.pendingUserMessage === "string" && rawData.pendingUserMessage.trim()
+          ? rawData.pendingUserMessage.trim()
+          : undefined,
+    };
+  }
+
+  return null;
 }
 
 function normalizePaging(raw: any, fallbackLimit: number): ChatPaging {
@@ -544,43 +602,66 @@ function hasPendingSwitchCode(payload: any): boolean {
   return payload?.code === "PENDING_PRIMARY_RECIPE_SWITCH_CONFIRMATION" || payload?.data?.code === "PENDING_PRIMARY_RECIPE_SWITCH_CONFIRMATION";
 }
 
-function hasPendingCompletionCheckCode(payload: any): boolean {
-  return payload?.code === COMPLETION_CHECK_PENDING_CODE || payload?.data?.code === COMPLETION_CHECK_PENDING_CODE;
+function hasPendingMealPolicyPromptCode(payload: any): boolean {
+  return (
+    payload?.code === MEAL_POLICY_PROMPT_PENDING_CODE || payload?.data?.code === MEAL_POLICY_PROMPT_PENDING_CODE
+  );
 }
 
-function isCompletionCheckRetryableError(error: any): boolean {
+function hasReadyToCompleteMealPolicyPromptCode(payload: any): boolean {
+  return (
+    payload?.code === MEAL_POLICY_PROMPT_READY_TO_COMPLETE_CODE ||
+    payload?.data?.code === MEAL_POLICY_PROMPT_READY_TO_COMPLETE_CODE
+  );
+}
+
+function isMealPolicyPromptRetryableError(error: any): boolean {
   const status = Number(error?.response?.status);
   return status === 400 || status === 404;
 }
 
-function findCompletionCheckActionLabel(actions: CompletionCheckAction[], actionId: CompletionCheckActionId): string {
+function findMealPolicyPromptActionLabel(
+  actions: MealPolicyPromptAction[],
+  actionId: MealPolicyPromptActionId,
+): string {
   return actions.find((item) => item.id === actionId)?.label || actionId;
 }
 
-function buildCompletionCheckMessageMeta(options: {
-  actions: CompletionCheckAction[];
-  status: CompletionCheckMessageStatus;
-  selectedActionId?: CompletionCheckActionId;
+function buildMealPolicyPromptMessageMeta(options: {
+  promptCode: MealPolicyPromptCode;
+  actions: MealPolicyPromptAction[];
+  status: MealPolicyPromptMessageStatus;
+  selectedActionId?: MealPolicyPromptActionId;
   selectedActionLabel?: string;
+  pendingUserMessage?: string;
+  messageTempId?: string;
+  originUserTempId?: string;
 }): ChatMessageMeta {
   return {
     flow: "meal_v2",
-    completionCheck: true,
+    mealPolicyPrompt: true,
+    promptCode: options.promptCode,
     actions: options.actions,
     status: options.status,
     selectedActionId: options.selectedActionId,
     selectedActionLabel: options.selectedActionLabel,
+    pendingUserMessage: options.pendingUserMessage,
+    messageTempId: options.messageTempId,
+    originUserTempId: options.originUserTempId,
   };
 }
 
-function buildCompletionCheckMessage(options: {
+function buildMealPolicyPromptMessage(options: {
   tempId: string;
   chatSessionId?: number | null;
   reminderMessage: string;
-  actions: CompletionCheckAction[];
-  status: CompletionCheckMessageStatus;
-  selectedActionId?: CompletionCheckActionId;
+  promptCode: MealPolicyPromptCode;
+  actions: MealPolicyPromptAction[];
+  status: MealPolicyPromptMessageStatus;
+  selectedActionId?: MealPolicyPromptActionId;
   selectedActionLabel?: string;
+  pendingUserMessage?: string;
+  originUserTempId?: string;
 }): ChatMessage {
   return {
     tempId: options.tempId,
@@ -588,16 +669,20 @@ function buildCompletionCheckMessage(options: {
     content: options.reminderMessage,
     createdAt: new Date().toISOString(),
     chatSessionId: options.chatSessionId ?? undefined,
-    meta: buildCompletionCheckMessageMeta({
+    meta: buildMealPolicyPromptMessageMeta({
+      promptCode: options.promptCode,
       actions: options.actions,
       status: options.status,
       selectedActionId: options.selectedActionId,
       selectedActionLabel: options.selectedActionLabel,
+      pendingUserMessage: options.pendingUserMessage,
+      messageTempId: options.tempId,
+      originUserTempId: options.originUserTempId,
     }),
   };
 }
 
-function updateCompletionCheckMessage(
+function updateMealPolicyPromptMessage(
   timeline: ChatMessage[],
   messageTempId: string,
   updater: (message: ChatMessage) => ChatMessage,
@@ -609,30 +694,36 @@ function removeMessageByTempId(timeline: ChatMessage[], tempId: string): ChatMes
   return timeline.filter((message) => message.tempId !== tempId);
 }
 
-function upsertCompletionCheckReminderMessage(options: {
+function upsertMealPolicyPromptMessage(options: {
   timeline: ChatMessage[];
   messageTempId: string;
   chatSessionId?: number | null;
   reminderMessage: string;
-  actions: CompletionCheckAction[];
-  status: CompletionCheckMessageStatus;
-  selectedActionId?: CompletionCheckActionId;
+  promptCode: MealPolicyPromptCode;
+  actions: MealPolicyPromptAction[];
+  status: MealPolicyPromptMessageStatus;
+  selectedActionId?: MealPolicyPromptActionId;
   selectedActionLabel?: string;
+  pendingUserMessage?: string;
+  originUserTempId?: string;
   resetTimestamp?: boolean;
 }): ChatMessage[] {
   const existingMessage = options.timeline.find((message) => message.tempId === options.messageTempId);
-  const nextMessage = buildCompletionCheckMessage({
+  const nextMessage = buildMealPolicyPromptMessage({
     tempId: options.messageTempId,
     chatSessionId: options.chatSessionId,
     reminderMessage: options.reminderMessage,
+    promptCode: options.promptCode,
     actions: options.actions,
     status: options.status,
     selectedActionId: options.selectedActionId,
     selectedActionLabel: options.selectedActionLabel,
+    pendingUserMessage: options.pendingUserMessage,
+    originUserTempId: options.originUserTempId,
   });
 
   if (existingMessage) {
-    return updateCompletionCheckMessage(options.timeline, options.messageTempId, (message) => ({
+    return updateMealPolicyPromptMessage(options.timeline, options.messageTempId, (message) => ({
       ...message,
       content: nextMessage.content,
       meta: nextMessage.meta,
@@ -1608,7 +1699,7 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
       const cleanedMessage = message.trim();
       if (!cleanedMessage || current.sending) return;
 
-      if (current.pendingCompletionCheck && current.pendingCompletionCheck.status !== "error") {
+      if (current.pendingMealPolicyPrompt && current.pendingMealPolicyPrompt.status !== "error") {
         toast.error("Hãy xác nhận trạng thái món hiện tại trước khi gửi tiếp");
         return;
       }
@@ -1654,6 +1745,7 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
         const responseData = extractData(responsePayload);
         const responseMessages = normalizeMessages(responseData);
         const responseSession = findPrimarySession(responsePayload) ?? stateRef.current.currentSession;
+        const mealPolicyPrompt = normalizeMealPolicyPromptPayload(responsePayload, responseData);
         let timeline = stateRef.current.timeline.map((item) =>
           item.tempId === optimisticTempId
             ? {
@@ -1696,8 +1788,7 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
             : nextContext.session
           : nextContext.session;
 
-        const completionCheck = normalizeCompletionCheckPayload(responseData?.completionCheck);
-        const completionCheckSessionId =
+        const mealPolicyPromptSessionId =
           resolvedSession?.chatSessionId ??
           resolvedMealSession.chatSessionId ??
           current.mealSession.chatSessionId ??
@@ -1707,28 +1798,31 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
           timeline = removeMessageByTempId(timeline, optimisticTempId);
         }
 
-        if (hasPendingCompletionCheckCode(responsePayload) && completionCheck && completionCheckSessionId) {
+        if (mealPolicyPrompt && mealPolicyPromptSessionId) {
           const messageTempId =
-            current.pendingCompletionCheck?.messageTempId ?? `temp-completion-check-${Date.now()}`;
-          const pendingCompletionCheck: PendingCompletionCheckState = {
-            chatSessionId: completionCheckSessionId,
-            recipeId: completionCheck.recipeId,
-            pendingUserMessage: completionCheck.pendingUserMessage ?? cleanedMessage,
-            userTempId: optimisticTempId,
-            reminderMessage: completionCheck.reminderMessage,
-            actions: completionCheck.actions,
+            current.pendingMealPolicyPrompt?.messageTempId ?? `temp-meal-policy-prompt-${Date.now()}`;
+          const pendingMealPolicyPrompt: PendingMealPolicyPromptState = {
+            chatSessionId: mealPolicyPromptSessionId,
+            promptCode: mealPolicyPrompt.promptCode,
+            pendingUserMessage: mealPolicyPrompt.pendingUserMessage ?? cleanedMessage,
+            originUserTempId: optimisticTempId,
+            reminderMessage: mealPolicyPrompt.reminderMessage,
+            actions: mealPolicyPrompt.actions,
             messageTempId,
             status: "pending",
           };
 
-          timeline = upsertCompletionCheckReminderMessage({
+          timeline = upsertMealPolicyPromptMessage({
             timeline,
             messageTempId,
-            chatSessionId: completionCheckSessionId,
-            reminderMessage: completionCheck.reminderMessage,
-            actions: completionCheck.actions,
+            chatSessionId: mealPolicyPromptSessionId,
+            reminderMessage: mealPolicyPrompt.reminderMessage,
+            promptCode: mealPolicyPrompt.promptCode,
+            actions: mealPolicyPrompt.actions,
             status: "pending",
-            resetTimestamp: current.pendingCompletionCheck?.messageTempId === messageTempId,
+            pendingUserMessage: pendingMealPolicyPrompt.pendingUserMessage,
+            originUserTempId: optimisticTempId,
+            resetTimestamp: current.pendingMealPolicyPrompt?.messageTempId === messageTempId,
           });
 
           mergeState({
@@ -1738,7 +1832,7 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
             mealSession: resolvedMealSession,
             mealItems: nextContext.mealItems,
             pendingPrimarySwitch: null,
-            pendingCompletionCheck,
+            pendingMealPolicyPrompt,
           });
           commitMealSnapshot(resolvedMealSession, nextContext.mealItems, userId);
 
@@ -1749,7 +1843,9 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
         }
 
         const assistantMessage =
-          typeof responseData?.assistantMessage === "string" && responseData.assistantMessage.trim()
+          !mealPolicyPrompt &&
+          typeof responseData?.assistantMessage === "string" &&
+          responseData.assistantMessage.trim()
             ? normalizeMessage({
                 role: "assistant",
                 content: responseData.assistantMessage.trim(),
@@ -1830,29 +1926,34 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
     [commitMealSnapshot, getUserId, mergeState, persistLastSession, setError],
   );
 
-  const resolveCompletionCheck = useCallback(
-    async ({ messageTempId, action }: ResolveCompletionCheckOptions) => {
+  const resolveMealPolicyPrompt = useCallback(
+    async ({ messageTempId, action }: ResolveMealPolicyPromptOptions) => {
       const userId = getUserId();
       const current = stateRef.current;
-      const pending = current.pendingCompletionCheck;
+      const pending = current.pendingMealPolicyPrompt;
 
       if (!userId || !pending || pending.messageTempId !== messageTempId) return false;
       if (pending.status === "loading") return false;
       if (!pending.actions.some((item) => item.id === action)) return false;
 
-      const actionLabel = findCompletionCheckActionLabel(pending.actions, action);
-      const pendingUserMessage = pending.pendingUserMessage.trim() ? pending.pendingUserMessage.trim() : undefined;
+      const actionLabel = findMealPolicyPromptActionLabel(pending.actions, action);
+      const trimmedPendingUserMessage =
+        typeof pending.pendingUserMessage === "string" ? pending.pendingUserMessage.trim() : "";
+      const pendingUserMessage = trimmedPendingUserMessage ? trimmedPendingUserMessage : undefined;
 
       mergeState({
-        timeline: upsertCompletionCheckReminderMessage({
+        timeline: upsertMealPolicyPromptMessage({
           timeline: current.timeline,
           messageTempId: pending.messageTempId,
           chatSessionId: pending.chatSessionId,
           reminderMessage: pending.reminderMessage,
+          promptCode: pending.promptCode,
           actions: pending.actions,
           status: "loading",
+          pendingUserMessage: pending.pendingUserMessage,
+          originUserTempId: pending.originUserTempId,
         }),
-        pendingCompletionCheck: {
+        pendingMealPolicyPrompt: {
           ...pending,
           status: "loading",
         },
@@ -1873,8 +1974,11 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
         const responseData = extractData(response);
         const responseMessages = normalizeMessages(responseData);
         const responseSession = findPrimarySession(response) ?? stateRef.current.currentSession;
+        const nextPrompt = normalizeMealPolicyPromptPayload(response, responseData);
         const assistantMessage =
-          typeof responseData?.assistantMessage === "string" && responseData.assistantMessage.trim()
+          !nextPrompt &&
+          typeof responseData?.assistantMessage === "string" &&
+          responseData.assistantMessage.trim()
             ? normalizeMessage({
                 role: "assistant",
                 content: responseData.assistantMessage.trim(),
@@ -1884,19 +1988,22 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
             : null;
         const mergedResponseMessages = assistantMessage ? [...responseMessages, assistantMessage] : responseMessages;
 
-        let timeline = upsertCompletionCheckReminderMessage({
+        let timeline = upsertMealPolicyPromptMessage({
           timeline: stateRef.current.timeline,
           messageTempId: pending.messageTempId,
           chatSessionId: pending.chatSessionId,
           reminderMessage: pending.reminderMessage,
+          promptCode: pending.promptCode,
           actions: pending.actions,
           status: "resolved",
           selectedActionId: action,
           selectedActionLabel: actionLabel,
+          pendingUserMessage: pending.pendingUserMessage,
+          originUserTempId: pending.originUserTempId,
         });
 
-        if (hasServerEchoedUserMessage(mergedResponseMessages, [pending.pendingUserMessage])) {
-          timeline = removeMessageByTempId(timeline, pending.userTempId);
+        if (pending.originUserTempId && hasServerEchoedUserMessage(mergedResponseMessages, [pending.pendingUserMessage])) {
+          timeline = removeMessageByTempId(timeline, pending.originUserTempId);
         }
 
         timeline = mergeAndSortTimeline(timeline, mergedResponseMessages);
@@ -1908,18 +2015,77 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
           fallbackSession: responseSession,
           fallbackMealItems: stateRef.current.mealItems,
           fallbackActiveRecipeId: responseSession?.activeRecipeId ?? stateRef.current.mealSession.activeRecipeId,
+          uiClosedOverride: action === "complete_session" ? true : undefined,
         });
 
+        const nextPromptSessionId =
+          nextContext.session?.chatSessionId ??
+          nextContext.mealSession.chatSessionId ??
+          pending.chatSessionId;
+        let nextPendingMealPolicyPrompt: PendingMealPolicyPromptState | null = null;
+
+        if (nextPrompt && nextPromptSessionId) {
+          const nextMessageTempId = `temp-meal-policy-prompt-${Date.now()}`;
+          nextPendingMealPolicyPrompt = {
+            chatSessionId: nextPromptSessionId,
+            promptCode: nextPrompt.promptCode,
+            pendingUserMessage: nextPrompt.pendingUserMessage,
+            originUserTempId: undefined,
+            reminderMessage: nextPrompt.reminderMessage,
+            actions: nextPrompt.actions,
+            messageTempId: nextMessageTempId,
+            status: "pending",
+          };
+
+          timeline = upsertMealPolicyPromptMessage({
+            timeline,
+            messageTempId: nextMessageTempId,
+            chatSessionId: nextPromptSessionId,
+            reminderMessage: nextPrompt.reminderMessage,
+            promptCode: nextPrompt.promptCode,
+            actions: nextPrompt.actions,
+            status: "pending",
+            pendingUserMessage: nextPrompt.pendingUserMessage,
+          });
+        }
+
+        const isCompletingSession = action === "complete_session";
+        const finalMealSession = isCompletingSession
+          ? {
+              ...nextContext.mealSession,
+              activeRecipeId: null,
+              needsSelection: false,
+              uiClosed: true,
+            }
+          : nextContext.mealSession;
+        const finalMealItems = isCompletingSession ? [] : nextContext.mealItems;
+        const hasAssistantResponse =
+          mergedResponseMessages.some((item) => item.role === "assistant") ||
+          (typeof responseData?.assistantMessage === "string" && responseData.assistantMessage.trim());
+        const finalTimeline =
+          isCompletingSession && !hasAssistantResponse
+            ? mergeAndSortTimeline(timeline, [
+                buildLocalCompletionMessage("completed", nextContext.session?.chatSessionId ?? pending.chatSessionId),
+              ])
+            : timeline;
+
         mergeState({
-          timeline,
+          timeline: finalTimeline,
           currentSessionId: nextContext.session?.chatSessionId ?? stateRef.current.currentSessionId,
-          currentSession: nextContext.session ?? stateRef.current.currentSession,
-          mealSession: nextContext.mealSession,
-          mealItems: nextContext.mealItems,
+          currentSession: isCompletingSession
+            ? nextContext.session
+              ? {
+                  ...nextContext.session,
+                  activeRecipeId: null,
+                }
+              : stateRef.current.currentSession
+            : nextContext.session ?? stateRef.current.currentSession,
+          mealSession: finalMealSession,
+          mealItems: finalMealItems,
           pendingPrimarySwitch: null,
-          pendingCompletionCheck: null,
+          pendingMealPolicyPrompt: nextPendingMealPolicyPrompt,
         });
-        commitMealSnapshot(nextContext.mealSession, nextContext.mealItems, userId);
+        commitMealSnapshot(finalMealSession, finalMealItems, userId);
 
         if (nextContext.session?.chatSessionId) {
           persistLastSession(nextContext.session.chatSessionId, userId);
@@ -1927,18 +2093,21 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
 
         return true;
       } catch (error: any) {
-        if (isCompletionCheckRetryableError(error)) {
-          const failureMessage = error?.response?.data?.message || "Không thể xác nhận trạng thái món lúc này";
+        if (isMealPolicyPromptRetryableError(error)) {
+          const failureMessage = error?.response?.data?.message || "Không thể xử lý lựa chọn này lúc này";
           mergeState({
-            timeline: upsertCompletionCheckReminderMessage({
+            timeline: upsertMealPolicyPromptMessage({
               timeline: stateRef.current.timeline,
               messageTempId: pending.messageTempId,
               chatSessionId: pending.chatSessionId,
               reminderMessage: pending.reminderMessage,
+              promptCode: pending.promptCode,
               actions: pending.actions,
               status: "error",
+              pendingUserMessage: pending.pendingUserMessage,
+              originUserTempId: pending.originUserTempId,
             }),
-            pendingCompletionCheck: {
+            pendingMealPolicyPrompt: {
               ...pending,
               status: "error",
             },
@@ -1950,12 +2119,12 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
         const refreshed = await refreshSessionHistory(pending.chatSessionId);
         mergeState({
           timeline: removeMessageByTempId(stateRef.current.timeline, pending.messageTempId),
-          pendingCompletionCheck: null,
+          pendingMealPolicyPrompt: null,
         });
         setError(
           refreshed
-            ? "Completion check không còn hợp lệ. Hội thoại đã được đồng bộ lại."
-            : "Không thể xử lý completion check lúc này",
+            ? "Prompt điều hướng bữa ăn không còn hợp lệ. Hội thoại đã được đồng bộ lại."
+            : "Không thể xử lý prompt điều hướng bữa ăn lúc này",
         );
         return false;
       } finally {
@@ -2175,7 +2344,7 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
       bootstrapUnifiedTimeline,
       loadOlderMessages,
       sendMessage,
-      resolveCompletionCheck,
+      resolveMealPolicyPrompt,
       retryMessage,
       syncMealSelection,
       setPrimaryRecipe,
@@ -2195,7 +2364,7 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
       bootstrapUnifiedTimeline,
       loadOlderMessages,
       sendMessage,
-      resolveCompletionCheck,
+      resolveMealPolicyPrompt,
       retryMessage,
       syncMealSelection,
       setPrimaryRecipe,

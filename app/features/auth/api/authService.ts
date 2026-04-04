@@ -5,6 +5,7 @@ import { buildApiUrl } from "~/lib/apiConfig";
 import {
   clearAuthSession,
   getRefreshToken,
+  type Gender,
   normalizeAuthSessionPayload,
   persistAuthSession,
 } from "~/utils/authUtils";
@@ -23,8 +24,14 @@ export const authService = {
     return response.data;
   },
 
-  register: async (fullName: string, phone: string, email: string, password: string): Promise<ApiResponse> => {
-    const response = await axios.post(`${API_URL}/register`, { fullName, phone, email, password });
+  register: async (
+    fullName: string,
+    phone: string,
+    email: string,
+    password: string,
+    gender: Gender,
+  ): Promise<ApiResponse> => {
+    const response = await axios.post(`${API_URL}/register`, { fullName, phone, email, password, gender });
     return response.data;
   },
 

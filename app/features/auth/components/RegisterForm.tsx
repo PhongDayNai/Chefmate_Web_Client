@@ -2,6 +2,14 @@
 import { useState } from "react";
 import { authService } from "../api/authService";
 import toast from "react-hot-toast";
+import type { Gender } from "~/utils/authUtils";
+
+const GENDER_OPTIONS: Array<{ value: Gender; label: string }> = [
+  { value: "male", label: "Nam" },
+  { value: "female", label: "Nữ" },
+  { value: "other", label: "Khác" },
+  { value: "unknown", label: "Không muốn nêu" },
+];
 
 interface Props {
   onSwitch: () => void;
@@ -12,21 +20,20 @@ export default function RegisterForm({ onSwitch }: Props) {
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [gender, setGender] = useState<Gender | "">("");
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!fullName || !phone || !email || !password) {
+    if (!fullName || !phone || !email || !password || !gender) {
       toast.error("Vui lòng nhập đầy đủ thông tin");
       return;
     }
 
     setLoading(true);
     try {
-      const res = await authService.register(fullName, phone, email, password);
-      // Giả sử API trả về success (hoặc xử lý theo cấu trúc response thực tế của bạn)
+      await authService.register(fullName, phone, email, password, gender);
       toast.success("Đăng ký thành công!");
-      // Chuyển sang form Đăng nhập
       setTimeout(() => {
         onSwitch();
       }, 1000);
@@ -61,6 +68,20 @@ export default function RegisterForm({ onSwitch }: Props) {
             value={email}
             onChange={(e) => setEmail(e.target.value)}
          />
+         <select
+            className="w-full px-4 py-3 rounded-lg border border-gray-300 outline-none bg-white"
+            value={gender}
+            onChange={(e) => setGender(e.target.value as Gender)}
+         >
+            <option value="" disabled>
+              Chọn giới tính
+            </option>
+            {GENDER_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+         </select>
          <input 
             type="password" 
             placeholder="Mật khẩu" 

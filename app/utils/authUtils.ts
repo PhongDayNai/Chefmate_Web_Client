@@ -1,10 +1,16 @@
 // Authentication utility functions
+export type Gender = "male" | "female" | "other" | "unknown";
+
+function normalizeGender(value: unknown): Gender {
+  return value === "male" || value === "female" || value === "other" ? value : "unknown";
+}
 
 export interface AuthUser {
   userId: number;
   fullName: string;
   phone?: string;
   email?: string;
+  gender: Gender;
   createdAt?: string;
   [key: string]: unknown;
 }
@@ -60,6 +66,7 @@ export function normalizeAuthUser(raw: any): AuthUser | null {
     fullName,
     phone: typeof raw.phone === "string" ? raw.phone : undefined,
     email: typeof raw.email === "string" ? raw.email : undefined,
+    gender: normalizeGender(raw.gender),
     createdAt: typeof raw.createdAt === "string" ? raw.createdAt : undefined,
   };
 }

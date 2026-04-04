@@ -72,7 +72,7 @@ export default function AiChatBubble() {
     handleTimelineScroll,
     autoScrollTimeline,
     handleSend,
-    handleResolveCompletionCheck,
+    handleResolveMealPolicyPrompt,
     handleRetryMessage,
     handleOpenRecipePicker,
     handleAddRecipeToMeal,
@@ -275,8 +275,8 @@ export default function AiChatBubble() {
                       message={msg}
                       compact
                       retryNow={retryNow}
-                      onCompletionCheckAction={(messageTempId, action) =>
-                        void handleResolveCompletionCheck(messageTempId, action)
+                      onMealPolicyPromptAction={(messageTempId, action) =>
+                        void handleResolveMealPolicyPrompt(messageTempId, action)
                       }
                       onRetry={(tempId) => void handleRetryMessage(tempId)}
                     />

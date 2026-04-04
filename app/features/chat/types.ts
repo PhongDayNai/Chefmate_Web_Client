@@ -3,9 +3,15 @@ export type ChatRole = "user" | "assistant" | "system";
 export type MealRecipeStatus = "pending" | "cooking" | "done" | "skipped";
 export type MealCompletionType = "completed" | "abandoned";
 export type MealRemainingStatus = "done" | "skipped" | null;
-export type CompletionCheckActionId = "mark_done" | "mark_skipped" | "continue_current";
-export type CompletionCheckStatus = "pending" | "loading" | "error";
-export type CompletionCheckMessageStatus = CompletionCheckStatus | "resolved";
+export type MealPolicyPromptCode = "PENDING_MEAL_V2_COMPLETION_CHECK" | "MEAL_SESSION_READY_TO_COMPLETE";
+export type MealPolicyPromptActionId =
+  | "mark_done"
+  | "mark_skipped"
+  | "continue_current"
+  | "complete_session"
+  | "keep_session_open";
+export type MealPolicyPromptStatus = "pending" | "loading" | "error";
+export type MealPolicyPromptMessageStatus = MealPolicyPromptStatus | "resolved";
 
 export interface ChatSession {
   chatSessionId: number;
@@ -16,34 +22,39 @@ export interface ChatSession {
   updatedAt?: string;
 }
 
-export interface CompletionCheckAction {
-  id: CompletionCheckActionId;
+export interface MealPolicyPromptAction {
+  id: MealPolicyPromptActionId;
   label: string;
 }
 
-export interface CompletionCheckPayload {
-  recipeId: number;
-  recipeName: string;
-  minutesSinceLastMessage: number;
-  isStrongReminder: boolean;
+export interface MealPolicyPromptPayload {
+  promptCode: MealPolicyPromptCode;
   reminderMessage: string;
   pendingUserMessage?: string;
-  actions: CompletionCheckAction[];
+  actions: MealPolicyPromptAction[];
+  recipeId?: number;
+  recipeName?: string;
+  minutesSinceLastMessage?: number;
+  isStrongReminder?: boolean;
   countToday?: number;
   dayKey?: string;
   cooldownMinutes?: number;
 }
 
-export interface CompletionCheckMessageMeta {
+export interface MealPolicyPromptMessageMeta {
   flow: "meal_v2";
-  completionCheck: true;
-  status: CompletionCheckMessageStatus;
-  actions: CompletionCheckAction[];
-  selectedActionId?: CompletionCheckActionId;
+  mealPolicyPrompt: true;
+  promptCode: MealPolicyPromptCode;
+  status: MealPolicyPromptMessageStatus;
+  actions: MealPolicyPromptAction[];
+  selectedActionId?: MealPolicyPromptActionId;
   selectedActionLabel?: string;
+  pendingUserMessage?: string;
+  messageTempId?: string;
+  originUserTempId?: string;
 }
 
-export type ChatMessageMeta = Record<string, unknown> & Partial<CompletionCheckMessageMeta>;
+export type ChatMessageMeta = Record<string, unknown> & Partial<MealPolicyPromptMessageMeta>;
 
 export interface ChatMessage {
   chatMessageId?: number;
@@ -148,15 +159,15 @@ export interface MealSnapshot {
   mealItems: MealItem[];
 }
 
-export interface PendingCompletionCheckState {
+export interface PendingMealPolicyPromptState {
   chatSessionId: number;
-  recipeId: number;
-  pendingUserMessage: string;
-  userTempId: string;
+  promptCode: MealPolicyPromptCode;
+  pendingUserMessage?: string;
+  originUserTempId?: string;
   reminderMessage: string;
-  actions: CompletionCheckAction[];
+  actions: MealPolicyPromptAction[];
   messageTempId: string;
-  status: CompletionCheckStatus;
+  status: MealPolicyPromptStatus;
 }
 
 export interface ChatUiState {
@@ -182,7 +193,7 @@ export interface ChatUiState {
   mealSession: MealSessionState;
   mealItems: MealItem[];
   pendingPrimarySwitch: PendingPrimarySwitch | null;
-  pendingCompletionCheck: PendingCompletionCheckState | null;
+  pendingMealPolicyPrompt: PendingMealPolicyPromptState | null;
   mealSyncing: boolean;
 }
 
@@ -236,7 +247,7 @@ export interface CompleteMealSessionPayload {
 
 export interface ResolveCompletionCheckPayload {
   chatSessionId: number;
-  action: CompletionCheckActionId;
+  action: MealPolicyPromptActionId;
   pendingUserMessage?: string;
   nextPrimaryRecipeId?: number | null;
   model?: string;

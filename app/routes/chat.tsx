@@ -66,7 +66,7 @@ export default function ChatPage() {
     handleTimelineScroll,
     autoScrollTimeline,
     handleSend,
-    handleResolveCompletionCheck,
+    handleResolveMealPolicyPrompt,
     handleRetryMessage,
     handleOpenRecipePicker,
     handleAddRecipeToMeal,
@@ -206,8 +206,8 @@ export default function ChatPage() {
                     message={msg}
                     retryNow={retryNow}
                     showAssistantLabel
-                    onCompletionCheckAction={(messageTempId, action) =>
-                      void handleResolveCompletionCheck(messageTempId, action)
+                    onMealPolicyPromptAction={(messageTempId, action) =>
+                      void handleResolveMealPolicyPrompt(messageTempId, action)
                     }
                     onRetry={(tempId) => void handleRetryMessage(tempId)}
                   />

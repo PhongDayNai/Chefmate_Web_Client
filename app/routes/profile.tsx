@@ -19,7 +19,15 @@ import {
   Mail
 } from "lucide-react";
 import toast from "react-hot-toast";
+import type { Gender } from "~/utils/authUtils";
 import { getAuthUser, updateStoredAuthUser } from "~/utils/authUtils";
+
+const GENDER_OPTIONS: Array<{ value: Gender; label: string }> = [
+  { value: "male", label: "Nam" },
+  { value: "female", label: "Nữ" },
+  { value: "other", label: "Khác" },
+  { value: "unknown", label: "Không muốn nêu" },
+];
 
 export default function ProfilePage() {
   const { requireAuth } = useAuthGuard();
@@ -27,7 +35,12 @@ export default function ProfilePage() {
   const [history, setHistory] = useState([]);
   const [myRecipes, setMyRecipes] = useState([]);
   const [dietNotes, setDietNotes] = useState([]); 
-  const [user, setUser] = useState({ fullName: "", email: "", phone: "" });
+  const [user, setUser] = useState<{ fullName: string; email: string; phone: string; gender: Gender }>({
+    fullName: "",
+    email: "",
+    phone: "",
+    gender: "unknown",
+  });
   const [pass, setPass] = useState({ current: "", new: "" });
   const [newNote, setNewNote] = useState({ label: "", noteType: "allergy" });
 
@@ -53,6 +66,7 @@ export default function ProfilePage() {
       fullName: authUser?.fullName || "",
       email: authUser?.email || "",
       phone: authUser?.phone || "",
+      gender: (authUser?.gender as Gender) || "unknown",
     });
   }, []);
 
@@ -64,7 +78,8 @@ export default function ProfilePage() {
     const res = await userService.updateInfo({
       fullName: user.fullName,
       email: user.email,
-      phone: user.phone
+      phone: user.phone,
+      gender: user.gender,
     });
 
     if (res.success) {
@@ -74,6 +89,7 @@ export default function ProfilePage() {
         fullName: res.data?.user?.fullName || res.data?.fullName || user.fullName,
         phone: res.data?.user?.phone || res.data?.phone || user.phone,
         email: res.data?.user?.email || res.data?.email || user.email,
+        gender: res.data?.user?.gender || res.data?.gender || user.gender,
       };
 
       updateStoredAuthUser(updatedUser);
@@ -81,6 +97,7 @@ export default function ProfilePage() {
         fullName: updatedUser.fullName || "",
         email: updatedUser.email || "",
         phone: updatedUser.phone || "",
+        gender: (updatedUser.gender as Gender) || "unknown",
       });
 
       toast.success("Cập nhật thông tin thành công!");
@@ -195,6 +212,21 @@ export default function ProfilePage() {
                             <Mail size={18} className="absolute left-4 top-4 text-gray-300" />
                             <input type="email" value={user.email} onChange={e => setUser({...user, email: e.target.value})} className="w-full p-4 pl-12 bg-gray-50 rounded-2xl outline-none focus:ring-2 focus:ring-[#f59127cc] font-medium" placeholder="Email"/>
                         </div>
+                    </div>
+
+                    <div className="space-y-2 md:col-span-2">
+                        <label className="text-[10px] font-black uppercase text-gray-400 ml-2">Giới tính</label>
+                        <select
+                          value={user.gender}
+                          onChange={e => setUser({...user, gender: e.target.value as Gender})}
+                          className="w-full p-4 bg-gray-50 rounded-2xl outline-none focus:ring-2 focus:ring-[#f59127cc] font-medium"
+                        >
+                          {GENDER_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
                     </div>
                   </div>
                   <button type="submit" className="flex items-center justify-center gap-2 px-8 py-4 bg-gray-900 text-white rounded-2xl font-bold hover:bg-black transition-all shadow-lg">
