@@ -183,15 +183,19 @@ export default function AiChatBubble() {
   if (pathname === "/chat") return null;
 
   return (
-    <div className="fixed bottom-6 right-6 z-[100] flex flex-col items-end gap-4">
+    <div className="fixed inset-x-2 bottom-2 z-[100] flex flex-col items-end gap-3 sm:inset-x-auto sm:bottom-6 sm:right-6 sm:gap-4">
       {isBubbleRendered ? (
         <div
           onWheel={handleBubbleWheel}
-          className={`flex h-[750px] max-h-[calc(100dvh-2rem)] w-[380px] flex-col overflow-hidden rounded-[2.5rem] border border-gray-100 bg-white shadow-2xl transition-all duration-300 ease-out md:w-[420px] ${
+          style={{
+            width: "min(100%, 420px)",
+            height: "min(750px, calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 6.5rem))",
+          }}
+          className={`flex flex-col overflow-hidden rounded-[2rem] border border-gray-100 bg-white shadow-2xl transition-all duration-300 ease-out sm:rounded-[2.5rem] md:w-[420px] ${
             isOpen ? "translate-y-0 scale-100 opacity-100" : "pointer-events-none translate-y-6 scale-95 opacity-0"
           }`}
         >
-          <div className="flex flex-shrink-0 items-center justify-between border-b border-gray-100 bg-gray-50 p-5 shadow-sm">
+          <div className="flex flex-shrink-0 items-center justify-between border-b border-gray-100 bg-gray-50 p-4 shadow-sm sm:p-5">
             <div className="flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-full border-2 border-white bg-orange-100 text-[#f59127]">
                 <Bot size={22} />
@@ -217,7 +221,7 @@ export default function AiChatBubble() {
             </div>
           </div>
 
-          <div className="flex-shrink-0 border-b border-gray-100 bg-white px-4 pb-3 pt-2">
+          <div className="flex-shrink-0 border-b border-gray-100 bg-white px-3 pb-3 pt-2 sm:px-4">
             <ChatContextCard
               compact
               activeRecipeLabel={activeRecipeLabel}
@@ -236,7 +240,7 @@ export default function AiChatBubble() {
             />
           </div>
 
-          <div ref={timelineRef} className="custom-scrollbar min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-y-contain bg-white p-5">
+          <div ref={timelineRef} className="custom-scrollbar min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-y-contain bg-white p-4 sm:p-5">
             {state.loadingTimeline && state.timeline.length === 0 ? (
               <div className="flex h-full items-center justify-center">
                 <Loader2 className="h-8 w-8 animate-spin text-[#f59127]" />
@@ -288,7 +292,7 @@ export default function AiChatBubble() {
             ) : null}
           </div>
 
-          <div className="flex-shrink-0 border-t border-gray-100 bg-gray-50 p-4">
+          <div className="flex-shrink-0 border-t border-gray-100 bg-gray-50 p-3 sm:p-4">
             <form
               onSubmit={(e) => {
                 e.preventDefault();
@@ -301,7 +305,7 @@ export default function AiChatBubble() {
                 onChange={(e) => setInput(e.target.value)}
                 disabled={!canSendMessage}
                 placeholder={state.mealSession.uiClosed ? "Phiên này đã hoàn tất. Hãy chọn món mới để tiếp tục." : "Hỏi Bepes công thức nấu ăn..."}
-                className="w-full rounded-2xl border-2 border-transparent bg-white p-4 pr-14 text-sm font-medium text-gray-900 shadow-sm outline-none transition-all focus:border-orange-200 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400"
+                className="w-full rounded-2xl border-2 border-transparent bg-white p-3.5 pr-14 text-sm font-medium text-gray-900 shadow-sm outline-none transition-all focus:border-orange-200 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400 sm:p-4 sm:pr-14"
               />
               <button
                 type="submit"
@@ -317,7 +321,7 @@ export default function AiChatBubble() {
 
       <button
         onClick={toggleChat}
-        className={`relative z-[101] flex h-16 w-16 transform items-center justify-center rounded-full text-white shadow-2xl transition-all duration-300 hover:scale-110 active:scale-95 ${
+        className={`relative z-[101] mr-1 flex h-16 w-16 transform items-center justify-center rounded-full text-white shadow-2xl transition-all duration-300 hover:scale-110 active:scale-95 sm:mr-0 ${
           isOpen ? "rotate-180 bg-[#ea6f12]" : "bg-[#f59127]"
         }`}
         type="button"
