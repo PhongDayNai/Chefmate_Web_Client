@@ -332,11 +332,11 @@ export default function AiChatBubble() {
       <MealPickerDialog
         isOpen={showRecipePicker}
         compact
-        mealItems={state.mealItems}
+        mealItems={state.mealSession.uiClosed ? [] : state.mealItems}
         recommendationGroups={recommendationGroups}
         activeRecipeId={state.mealSession.activeRecipeId}
         highlightedRecipeId={highlightedRecipeId}
-        isLocked={state.mealSession.uiClosed}
+        isLocked={false}
         isSaving={state.mealSyncing}
         onClose={() => setShowRecipePicker(false)}
         onAddRecipe={(item) => void handleAddRecipeToMeal(item)}

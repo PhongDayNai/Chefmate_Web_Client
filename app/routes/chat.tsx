@@ -112,32 +112,32 @@ export default function ChatPage() {
   }, [autoScrollTimeline, state.sending, state.timeline]);
 
   return (
-    <div className="flex h-[calc(100vh-64px)] justify-center bg-[#f3f3f5] px-2 py-2 sm:px-4 sm:py-4">
-      <section className="relative flex h-full w-full max-w-4xl flex-col overflow-hidden rounded-[2rem] bg-[#f3f3f5] shadow-sm">
-        <div className="rounded-[1.8rem] bg-gradient-to-r from-[#ff7a16] via-[#f69035] to-[#ffb467] px-5 py-4 text-white shadow-md">
-          <div className="flex items-center gap-3">
+    <div className="flex h-[calc(100vh-64px)] justify-center bg-[#f3f3f5] px-1.5 py-1.5 sm:px-4 sm:py-4">
+      <section className="relative flex h-full w-full max-w-4xl flex-col overflow-hidden rounded-[1.6rem] bg-[#f3f3f5] shadow-sm sm:rounded-[2rem]">
+        <div className="rounded-[1.4rem] bg-gradient-to-r from-[#ff7a16] via-[#f69035] to-[#ffb467] px-3 py-3 text-white shadow-md sm:rounded-[1.8rem] sm:px-5 sm:py-4">
+          <div className="flex items-center gap-2.5 sm:gap-3">
             <button
               type="button"
               onClick={() => router.back()}
-              className="rounded-full bg-white/20 p-2.5 transition hover:bg-white/30"
+              className="rounded-full bg-white/20 p-2 transition hover:bg-white/30 sm:p-2.5"
               title="Quay lại"
             >
-              <ChevronLeft size={18} />
+              <ChevronLeft size={16} />
             </button>
 
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white/20">
-              <Bot size={22} />
+            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-white/20 sm:h-10 sm:w-10">
+              <Bot size={20} />
             </div>
             <div>
-              <h1 className="text-3xl font-black leading-none tracking-tight">Bepes</h1>
-              <p className="mt-1 text-xs font-semibold text-white/80">Trợ lý nấu ăn theo tủ lạnh và khẩu vị</p>
+              <h1 className="text-[24px] font-black leading-none tracking-tight sm:text-3xl">Bepes</h1>
+              <p className="mt-0.5 text-[11px] font-semibold text-white/80 sm:mt-1 sm:text-xs">Trợ lý nấu ăn theo tủ lạnh và khẩu vị</p>
             </div>
           </div>
         </div>
 
-        <div className="px-4 pt-4">{!isLoggedIn ? <NeedLoginCard /> : null}</div>
+        <div className="px-3 pt-3 sm:px-4 sm:pt-4">{!isLoggedIn ? <NeedLoginCard /> : null}</div>
 
-        <div className="px-4 pt-3">
+        <div className="px-3 pt-2.5 sm:px-4 sm:pt-3">
           <ChatContextCard
             activeRecipeLabel={activeRecipeLabel}
             dietSummary={dietSummary}
@@ -155,7 +155,7 @@ export default function ChatPage() {
           />
         </div>
 
-        <div ref={timelineRef} className="custom-scrollbar flex-1 overflow-y-auto px-4 pb-3 pt-4">
+        <div ref={timelineRef} className="custom-scrollbar flex-1 overflow-y-auto px-3 pb-2.5 pt-3 sm:px-4 sm:pb-3 sm:pt-4">
           {state.loadingTimeline && state.timeline.length > 0 ? (
             <div className="mb-3 flex justify-center">
               <Loader2 className="h-5 w-5 animate-spin text-[#f59127]" />
@@ -251,11 +251,11 @@ export default function ChatPage() {
 
       <MealPickerDialog
         isOpen={showRecipePicker}
-        mealItems={state.mealItems}
+        mealItems={state.mealSession.uiClosed ? [] : state.mealItems}
         recommendationGroups={recommendationGroups}
         activeRecipeId={state.mealSession.activeRecipeId}
         highlightedRecipeId={highlightedRecipeId}
-        isLocked={state.mealSession.uiClosed}
+        isLocked={false}
         isSaving={state.mealSyncing}
         onClose={() => setShowRecipePicker(false)}
         onAddRecipe={(item) => void handleAddRecipeToMeal(item)}

@@ -163,7 +163,7 @@ export function useChatViewModel({
   const canCompleteSession = Boolean(
     state.mealSession.chatSessionId && !state.mealSession.uiClosed && !state.mealSyncing && !state.sending,
   );
-  const canMutateMeal = Boolean(!state.mealSession.uiClosed && !state.mealSyncing && !state.sending);
+  const canMutateMeal = Boolean(!state.mealSyncing && !state.sending);
   const canSendMessage = Boolean(!state.mealSession.uiClosed && !state.sending);
 
   const selectedRecipeEntries = useMemo(
@@ -319,18 +319,19 @@ export function useChatViewModel({
     async (item: ChatRecommendation) => {
       const uid = ensureUserId();
       if (!uid) return;
-      if (state.mealItems.some((mealItem) => mealItem.recipeId === item.recipeId)) return;
+      const baseMealItems = state.mealSession.uiClosed ? [] : state.mealItems;
+      if (baseMealItems.some((mealItem) => mealItem.recipeId === item.recipeId)) return;
 
       const nextItems = [
-        ...state.mealItems,
-        buildMealItemFromRecommendation(item, state.mealItems.length + 1),
+        ...baseMealItems,
+        buildMealItemFromRecommendation(item, baseMealItems.length + 1),
       ];
       const ok = await syncMealSelection(nextItems);
       if (ok) {
         setHighlightedRecipeId(item.recipeId);
       }
     },
-    [ensureUserId, state.mealItems, syncMealSelection],
+    [ensureUserId, state.mealItems, state.mealSession.uiClosed, syncMealSelection],
   );
 
   const handleRemoveMealRecipe = useCallback(

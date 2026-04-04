@@ -34,6 +34,7 @@ import { recipeService } from "~/features/recipes/api/recipeService";
 import { getAuthUserId } from "~/utils/authUtils";
 
 const DEFAULT_LIMIT = 32;
+const SESSION_CREATE_TIMELINE_LIMIT = 30;
 const MAX_NO_PROGRESS_ATTEMPTS = 2;
 const LAST_CHAT_SESSION_ID_KEY = "lastChatSessionId";
 const LAST_CHAT_USER_ID_KEY = "lastChatUserId";
@@ -580,7 +581,7 @@ function buildMealContext(options: {
   };
 }
 
-function buildLocalCompletionMessage(completionType: MealCompletionType): ChatMessage {
+function buildLocalCompletionMessage(completionType: MealCompletionType, chatSessionId?: number | null): ChatMessage {
   return {
     tempId: `local-complete-${Date.now()}`,
     role: "assistant",
@@ -589,6 +590,7 @@ function buildLocalCompletionMessage(completionType: MealCompletionType): ChatMe
         ? "Đã đóng phiên nấu hiện tại. Khi cần, mình có thể giúp bạn bắt đầu một bữa mới."
         : "Đã hoàn thành phiên nấu cho bữa này. Khi cần, mình có thể giúp bạn bắt đầu kế hoạch bữa mới ngay.",
     createdAt: new Date().toISOString(),
+    chatSessionId: chatSessionId ?? undefined,
   };
 }
 
@@ -783,6 +785,8 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
       const res = await chatService.getSessionHistory(storedSessionId);
       const data = extractData(res);
       const timeline = mergeAndSortTimeline([], normalizeMessages(data?.messages));
+      const oldestLoadedMessageId =
+        timeline.find((message) => Number.isFinite(message.chatMessageId) && Number(message.chatMessageId) > 0)?.chatMessageId ?? null;
 
       if (!timeline.length) {
         persistLastSession(null, userId);
@@ -798,8 +802,8 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
         currentSessionId: restoredSession?.chatSessionId ?? storedSessionId,
         currentSession: restoredSession,
         timeline,
-        hasMore: false,
-        nextBeforeMessageId: null,
+        hasMore: Boolean(oldestLoadedMessageId),
+        nextBeforeMessageId: oldestLoadedMessageId,
         noProgressLoadCount: 0,
       });
       hydrateMealFromSession(restoredSession, userId);
@@ -887,9 +891,21 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
     await loadSessions();
 
     const restored = await tryRestoreLastSession();
-    if (restored) return;
-
+    const restoredSessionId = restored ? stateRef.current.currentSessionId : null;
+    const restoredSession = restored ? stateRef.current.currentSession : null;
     await fetchUnifiedTimeline();
+
+    if (restored && restoredSessionId) {
+      const preservedSession =
+        stateRef.current.sessions.find((item) => item.chatSessionId === restoredSessionId) ?? restoredSession ?? null;
+
+      mergeState({
+        currentSessionId: restoredSessionId,
+        currentSession: preservedSession,
+      });
+      hydrateMealFromSession(preservedSession, userId);
+      persistLastSession(restoredSessionId, userId);
+    }
   }, [fetchUnifiedTimeline, getUserId, loadSessions, refreshHomeContext, tryRestoreLastSession]);
 
   const enqueueMealMutation = useCallback(async <T,>(runner: () => Promise<T>): Promise<T> => {
@@ -907,10 +923,7 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
       }
 
       const current = stateRef.current;
-      if (current.mealSession.uiClosed) {
-        setError("Phiên nấu hiện tại đã hoàn tất và không thể chỉnh sửa");
-        return false;
-      }
+      const shouldStartFreshSession = current.mealSession.uiClosed;
 
       const normalizedItems = sortMealItems(items);
       const optimisticActiveRecipeId =
@@ -920,12 +933,12 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
             ? normalizedItems[0].recipeId
             : null;
       const optimisticMealSession: MealSessionState = {
-        chatSessionId: current.mealSession.chatSessionId,
+        chatSessionId: shouldStartFreshSession ? null : current.mealSession.chatSessionId,
         activeRecipeId: optimisticActiveRecipeId,
         needsSelection: deriveNeedsSelection(normalizedItems, optimisticActiveRecipeId),
         uiClosed: false,
       };
-      const fallbackSession = current.currentSession
+      const fallbackSession = !shouldStartFreshSession && current.currentSession
         ? {
             ...current.currentSession,
             activeRecipeId: optimisticMealSession.activeRecipeId,
@@ -960,9 +973,10 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
               }
             : null;
           let response: any;
+          let nextTimeline = stateRef.current.timeline;
           if (!latestSessionId && normalizedItems.length > 0) {
             response = await chatService.createMealSession({
-              title: latest.currentSession?.title || "Bepes",
+              title: current.currentSession?.title || latest.currentSession?.title || "Bepes",
               recipeIds: normalizedItems.map((item) => item.recipeId),
             });
           } else if (latestSessionId) {
@@ -990,7 +1004,66 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
             fallbackActiveRecipeId: latestActiveRecipeId,
           });
 
+          const responseData = extractData(response);
+          const responseMessages = normalizeMessages(responseData);
+          const assistantMessage =
+            typeof responseData?.assistantMessage === "string" && responseData.assistantMessage.trim()
+              ? normalizeMessage({
+                  role: "assistant",
+                  content: responseData.assistantMessage.trim(),
+                  createdAt: new Date().toISOString(),
+                  chatSessionId: nextContext.session?.chatSessionId ?? stateRef.current.currentSessionId,
+                })
+              : null;
+          const mergedResponseMessages = assistantMessage ? [...responseMessages, assistantMessage] : responseMessages;
+
+          const targetSessionId = nextContext.session?.chatSessionId ?? null;
+          if (!latestSessionId && targetSessionId) {
+            try {
+              const timelineResponse = await chatService.getUnifiedTimeline({
+                limit: SESSION_CREATE_TIMELINE_LIMIT,
+              });
+              const timelineData = extractData(timelineResponse);
+              const createdSessionMessages = normalizeMessages(timelineData).filter(
+                (message) => message.chatSessionId === targetSessionId,
+              );
+              const introMessages = createdSessionMessages.filter(
+                (message) => message.role === "assistant" && Boolean(message.meta && "intro" in message.meta && message.meta.intro),
+              );
+              const preferredSessionMessages = introMessages.length ? introMessages : createdSessionMessages;
+
+              if (preferredSessionMessages.length) {
+                nextTimeline = mergeAndSortTimeline(stateRef.current.timeline, preferredSessionMessages);
+              }
+            } catch {
+              // Do not fail the create flow if the welcome timeline fetch is unavailable.
+            }
+          }
+
+          if (mergedResponseMessages.length) {
+            nextTimeline = mergeAndSortTimeline(nextTimeline, mergedResponseMessages);
+          }
+
+          if (targetSessionId) {
+            try {
+              const refreshedTimelineResponse = await chatService.getUnifiedTimeline({
+                limit: SESSION_CREATE_TIMELINE_LIMIT,
+              });
+              const refreshedTimelineData = extractData(refreshedTimelineResponse);
+              const refreshedSessionMessages = normalizeMessages(refreshedTimelineData).filter(
+                (message) => message.chatSessionId === targetSessionId,
+              );
+
+              if (refreshedSessionMessages.length) {
+                nextTimeline = mergeAndSortTimeline(nextTimeline, refreshedSessionMessages);
+              }
+            } catch {
+              // Ignore timeline refresh failures after meal updates.
+            }
+          }
+
           mergeState({
+            timeline: nextTimeline,
             currentSessionId: nextContext.session?.chatSessionId ?? stateRef.current.currentSessionId,
             currentSession: nextContext.session ?? stateRef.current.currentSession,
             mealSession: nextContext.mealSession,
@@ -1557,7 +1630,9 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
           (typeof responseData?.assistantMessage === "string" && responseData.assistantMessage.trim());
         const timeline = hasAssistantResponse
           ? mergeAndSortTimeline(stateRef.current.timeline, mergedCompletionMessages)
-          : mergeAndSortTimeline(stateRef.current.timeline, [buildLocalCompletionMessage(payload.completionType || "completed")]);
+          : mergeAndSortTimeline(stateRef.current.timeline, [
+              buildLocalCompletionMessage(payload.completionType || "completed", chatSessionId),
+            ]);
 
         mergeState({
           timeline,
@@ -1571,18 +1646,20 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
           mealSession: {
             ...nextContext.mealSession,
             activeRecipeId: null,
+            needsSelection: false,
             uiClosed: true,
           },
-          mealItems: nextContext.mealItems,
+          mealItems: [],
           pendingPrimarySwitch: null,
         });
         commitMealSnapshot(
           {
             ...nextContext.mealSession,
             activeRecipeId: null,
+            needsSelection: false,
             uiClosed: true,
           },
-          nextContext.mealItems,
+          [],
           userId,
         );
         toast.success("Đã hoàn tất phiên nấu ăn");

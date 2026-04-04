@@ -48,14 +48,18 @@ export function shouldShowSessionDivider(timeline: ChatMessage[], index: number)
   if (index === 0) return true;
 
   const current = timeline[index];
-  const previous = timeline[index - 1];
-  if (!current || !previous) return false;
+  if (!current) return false;
 
   if (current.isSessionStart) return true;
 
-  return Boolean(
-    current.chatSessionId &&
-      previous.chatSessionId &&
-      current.chatSessionId !== previous.chatSessionId,
-  );
+  if (!current.chatSessionId) return false;
+
+  for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+    const previous = timeline[cursor];
+    if (!previous) continue;
+    if (!previous.chatSessionId) continue;
+    return previous.chatSessionId !== current.chatSessionId;
+  }
+
+  return false;
 }
