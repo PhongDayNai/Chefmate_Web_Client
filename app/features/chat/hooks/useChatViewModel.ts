@@ -119,7 +119,6 @@ export function useChatViewModel({
   const nearBottomRef = useRef(true);
   const bootstrappingRef = useRef(false);
   const consumedRecipeParamRef = useRef<number | null>(null);
-  const autoOpenedNeedSelectionRef = useRef<string | null>(null);
 
   useEffect(() => {
     setResolvedUserId(getAuthUserId());
@@ -261,16 +260,6 @@ export function useChatViewModel({
     };
   }, [onRecipeParamConsumed, recipeIdParam, refreshRecommendations, userId]);
 
-  useEffect(() => {
-    if (!state.mealSession.needsSelection || state.mealSession.uiClosed) return;
-
-    const autoPromptKey = `${state.mealSession.chatSessionId ?? "none"}:${state.mealItems.length}:${state.mealSession.activeRecipeId ?? "none"}`;
-    if (autoOpenedNeedSelectionRef.current === autoPromptKey) return;
-
-    autoOpenedNeedSelectionRef.current = autoPromptKey;
-    setShowRecipePicker(true);
-  }, [state.mealItems.length, state.mealSession.activeRecipeId, state.mealSession.chatSessionId, state.mealSession.needsSelection, state.mealSession.uiClosed]);
-
   const ensureUserId = useCallback(() => {
     if (!ensureAuth()) return null;
     const uid = getAuthUserId() ?? getUserId();
@@ -335,6 +324,13 @@ export function useChatViewModel({
     await refreshRecommendations();
     setShowRecipePicker(true);
   }, [ensureUserId, refreshRecommendations]);
+
+  const handleOpenMealPickerFromPrompt = useCallback(
+    async (_messageTempId: string) => {
+      await handleOpenRecipePicker();
+    },
+    [handleOpenRecipePicker],
+  );
 
   const handleAddRecipeToMeal = useCallback(
     async (item: ChatRecommendation) => {
@@ -574,6 +570,7 @@ export function useChatViewModel({
     autoScrollTimeline,
     handleSend,
     handleResolveMealPolicyPrompt,
+    handleOpenMealPickerFromPrompt,
     handleRetryMessage,
     handleOpenRecipePicker,
     handleAddRecipeToMeal,

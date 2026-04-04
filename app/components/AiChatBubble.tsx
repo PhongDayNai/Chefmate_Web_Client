@@ -73,6 +73,7 @@ export default function AiChatBubble() {
     autoScrollTimeline,
     handleSend,
     handleResolveMealPolicyPrompt,
+    handleOpenMealPickerFromPrompt,
     handleRetryMessage,
     handleOpenRecipePicker,
     handleAddRecipeToMeal,
@@ -277,6 +278,9 @@ export default function AiChatBubble() {
                       retryNow={retryNow}
                       onMealPolicyPromptAction={(messageTempId, action) =>
                         void handleResolveMealPolicyPrompt(messageTempId, action)
+                      }
+                      onOpenMealPickerFromPrompt={(messageTempId) =>
+                        void handleOpenMealPickerFromPrompt(messageTempId)
                       }
                       onRetry={(tempId) => void handleRetryMessage(tempId)}
                     />

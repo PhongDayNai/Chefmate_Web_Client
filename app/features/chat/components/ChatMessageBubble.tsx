@@ -16,6 +16,7 @@ interface Props {
   showAssistantLabel?: boolean;
   onRetry?: (tempId: string) => void;
   onMealPolicyPromptAction?: (messageTempId: string, action: MealPolicyPromptActionId) => void;
+  onOpenMealPickerFromPrompt?: (messageTempId: string) => void;
 }
 
 function getRetryCountdown(message: ChatMessage, retryNow: number): number {
@@ -93,6 +94,7 @@ export default function ChatMessageBubble({
   showAssistantLabel = false,
   onRetry,
   onMealPolicyPromptAction,
+  onOpenMealPickerFromPrompt,
 }: Props) {
   const isUser = message.role === "user";
   const retryCountdown = getRetryCountdown(message, retryNow);
@@ -100,6 +102,12 @@ export default function ChatMessageBubble({
   const mealPolicyPromptMeta = !isUser ? getMealPolicyPromptMeta(message) : null;
   const mealPolicyPromptDisabled =
     !message.tempId || mealPolicyPromptMeta?.status === "loading" || mealPolicyPromptMeta?.status === "resolved";
+  const canOpenMealPickerFromPrompt = Boolean(
+    message.tempId &&
+      mealPolicyPromptMeta?.promptCode === "MEAL_SESSION_READY_TO_COMPLETE" &&
+      mealPolicyPromptMeta.status !== "loading" &&
+      mealPolicyPromptMeta.status !== "resolved",
+  );
 
   return (
     <div className={`flex gap-2.5 ${isUser ? "flex-row-reverse" : ""}`}>
@@ -159,6 +167,19 @@ export default function ChatMessageBubble({
                   </button>
                 );
               })}
+
+              {canOpenMealPickerFromPrompt ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!message.tempId) return;
+                    onOpenMealPickerFromPrompt?.(message.tempId);
+                  }}
+                  className="inline-flex items-center gap-2 rounded-full border border-[#ffd7ad] bg-[#fff2df] px-3 py-1.5 text-xs font-black text-[#c26a17] transition hover:bg-[#ffe9cb]"
+                >
+                  Chọn thêm món
+                </button>
+              ) : null}
             </div>
 
             {mealPolicyPromptMeta.status === "resolved" && mealPolicyPromptMeta.selectedActionLabel ? (

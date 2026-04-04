@@ -67,6 +67,7 @@ export default function ChatPage() {
     autoScrollTimeline,
     handleSend,
     handleResolveMealPolicyPrompt,
+    handleOpenMealPickerFromPrompt,
     handleRetryMessage,
     handleOpenRecipePicker,
     handleAddRecipeToMeal,
@@ -208,6 +209,9 @@ export default function ChatPage() {
                     showAssistantLabel
                     onMealPolicyPromptAction={(messageTempId, action) =>
                       void handleResolveMealPolicyPrompt(messageTempId, action)
+                    }
+                    onOpenMealPickerFromPrompt={(messageTempId) =>
+                      void handleOpenMealPickerFromPrompt(messageTempId)
                     }
                     onRetry={(tempId) => void handleRetryMessage(tempId)}
                   />

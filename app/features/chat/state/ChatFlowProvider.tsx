@@ -694,6 +694,21 @@ function removeMessageByTempId(timeline: ChatMessage[], tempId: string): ChatMes
   return timeline.filter((message) => message.tempId !== tempId);
 }
 
+function clearPendingMealPolicyPromptState(state: ChatUiState): Pick<ChatUiState, "timeline" | "pendingMealPolicyPrompt"> {
+  const pending = state.pendingMealPolicyPrompt;
+  if (!pending) {
+    return {
+      timeline: state.timeline,
+      pendingMealPolicyPrompt: null,
+    };
+  }
+
+  return {
+    timeline: removeMessageByTempId(state.timeline, pending.messageTempId),
+    pendingMealPolicyPrompt: null,
+  };
+}
+
 function upsertMealPolicyPromptMessage(options: {
   timeline: ChatMessage[];
   messageTempId: string;
@@ -1214,11 +1229,15 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
           }
         : null;
 
+      const clearedPendingPrompt = clearPendingMealPolicyPromptState(current);
+
       mergeState({
+        timeline: clearedPendingPrompt.timeline,
         mealItems: normalizedItems,
         mealSession: optimisticMealSession,
         currentSession: fallbackSession,
         pendingPrimarySwitch: null,
+        pendingMealPolicyPrompt: null,
       });
 
       const rollback = committedMealRef.current;
@@ -1338,6 +1357,7 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
             mealSession: nextContext.mealSession,
             mealItems: nextContext.mealItems,
             pendingPrimarySwitch: null,
+            pendingMealPolicyPrompt: null,
           });
 
           commitMealSnapshot(nextContext.mealSession, nextContext.mealItems, userId);
@@ -1358,6 +1378,8 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
                 activeRecipeId: rollback.mealSession.activeRecipeId,
               }
             : stateRef.current.currentSession,
+          pendingMealPolicyPrompt: current.pendingMealPolicyPrompt,
+          timeline: current.timeline,
         });
         setError("Không thể cập nhật danh sách món trong phiên chat");
         return false;
