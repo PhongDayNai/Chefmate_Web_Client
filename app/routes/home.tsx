@@ -102,12 +102,13 @@ export default function Home() {
   }, [fetchTrending]);
 
   const showLoadMoreButton = hasMore && autoLoadCountRef.current >= MAX_AUTO_LOAD_BATCHES;
+  const displayName = userName ? userName.split(" ").pop() : null;
 
   return (
     <main className="max-w-7xl mx-auto px-4 py-8">
       <div className="mb-10 p-8 rounded-3xl bg-gradient-to-r from-[#f59127cc] to-[#f59127] text-white shadow-lg">
         <h2 className="text-3xl font-bold mb-2">
-          Hôm nay nấu gì nhỉ, {userName ? userName.split(" ").pop() : ""}?
+          {displayName ? `Hôm nay nấu gì nhỉ, ${displayName}?` : "Hôm nay nấu gì nhỉ?"}
         </h2>
         <p className="opacity-90">Khám phá công thức nấu ăn dành riêng cho bạn.</p>
 

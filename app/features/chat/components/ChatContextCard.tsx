@@ -52,6 +52,7 @@ export default function ChatContextCard({
   const baseButtonClass = compact
     ? "rounded-xl px-2 py-2 text-[11px] font-black transition hover:brightness-95"
     : "rounded-[1rem] px-3 py-2.5 text-[14px] font-black transition hover:brightness-95 sm:rounded-[1.1rem] sm:px-3.5 sm:py-2.5 sm:text-[15px]";
+  const mealActionLabel = mealCount > 0 ? "Món ăn" : "Chọn món";
 
   const quickActionClass =
     "flex h-8 w-8 items-center justify-center rounded-full border bg-white shadow-sm transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-50";
@@ -107,7 +108,7 @@ export default function ChatContextCard({
             disabled={!canMutateMeal}
             onClick={onOpenMealPicker}
             className={`${quickActionClass} ${quickActionClassName("warm")}`}
-            title="Chọn món"
+            title={mealActionLabel}
           >
             <UtensilsCrossed size={14} />
           </button>
@@ -154,7 +155,7 @@ export default function ChatContextCard({
           onClick={onOpenMealPicker}
           className={`${baseButtonClass} ${actionClassName("warm")} disabled:cursor-not-allowed disabled:opacity-60`}
         >
-          Chọn món
+          {mealActionLabel}
         </button>
         <button
           type="button"
