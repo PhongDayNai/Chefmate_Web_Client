@@ -1081,17 +1081,25 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
         normalizeSession(data?.session) ??
         stateRef.current.sessions.find((item) => item.chatSessionId === storedSessionId) ??
         null;
+      const restoredContext = buildMealContext({
+        payload: res,
+        userId,
+        state: stateRef.current,
+        fallbackSession: restoredSession,
+      });
 
       mergeState({
-        currentSessionId: restoredSession?.chatSessionId ?? storedSessionId,
-        currentSession: restoredSession,
+        currentSessionId: restoredContext.session?.chatSessionId ?? restoredSession?.chatSessionId ?? storedSessionId,
+        currentSession: restoredContext.session ?? restoredSession,
         timeline,
         hasMore: Boolean(oldestLoadedMessageId),
         nextBeforeMessageId: oldestLoadedMessageId,
         noProgressLoadCount: 0,
+        mealSession: restoredContext.mealSession,
+        mealItems: restoredContext.mealItems,
       });
-      hydrateMealFromSession(restoredSession, userId);
-      persistLastSession(restoredSession?.chatSessionId ?? storedSessionId, userId);
+      commitMealSnapshot(restoredContext.mealSession, restoredContext.mealItems, userId);
+      persistLastSession(restoredContext.session?.chatSessionId ?? restoredSession?.chatSessionId ?? storedSessionId, userId);
       return true;
     } catch {
       persistLastSession(null, userId);
@@ -1099,7 +1107,7 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
     } finally {
       mergeState({ loadingTimeline: false });
     }
-  }, [getUserId, hydrateMealFromSession, mergeState, persistLastSession]);
+  }, [commitMealSnapshot, getUserId, mergeState, persistLastSession]);
 
   const fetchUnifiedTimeline = useCallback(
     async (beforeMessageId?: number) => {
@@ -1156,7 +1164,32 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
 
         if (!beforeMessageId) {
           persistLastSession(nextCurrentSession?.chatSessionId ?? null, userId);
-          hydrateMealFromSession(nextCurrentSession, userId);
+          if (nextCurrentSession?.chatSessionId) {
+            try {
+              const sessionHistoryResponse = await chatService.getSessionHistory(nextCurrentSession.chatSessionId);
+              const sessionHistoryData = extractData(sessionHistoryResponse);
+              const sessionHistoryMessages = normalizeMessages(sessionHistoryData?.messages);
+              const hydratedContext = buildMealContext({
+                payload: sessionHistoryResponse,
+                userId,
+                state: stateRef.current,
+                fallbackSession: nextCurrentSession,
+              });
+
+              mergeState({
+                timeline: mergeAndSortTimeline(stateRef.current.timeline, sessionHistoryMessages),
+                currentSessionId: hydratedContext.session?.chatSessionId ?? nextCurrentSession.chatSessionId,
+                currentSession: hydratedContext.session ?? stateRef.current.currentSession,
+                mealSession: hydratedContext.mealSession,
+                mealItems: hydratedContext.mealItems,
+              });
+              commitMealSnapshot(hydratedContext.mealSession, hydratedContext.mealItems, userId);
+            } catch {
+              hydrateMealFromSession(nextCurrentSession, userId);
+            }
+          } else {
+            hydrateMealFromSession(nextCurrentSession, userId);
+          }
         }
       } catch {
         setError("Không thể tải timeline hội thoại");
@@ -1164,7 +1197,7 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
         mergeState({ loadingTimeline: false });
       }
     },
-    [getUserId, hydrateMealFromSession, mergeState, persistLastSession, setError],
+    [commitMealSnapshot, getUserId, hydrateMealFromSession, mergeState, persistLastSession, setError],
   );
 
   const bootstrapUnifiedTimeline = useCallback(async () => {
