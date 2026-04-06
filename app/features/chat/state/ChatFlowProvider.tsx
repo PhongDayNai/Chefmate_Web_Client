@@ -230,7 +230,7 @@ function normalizeSession(raw: any): ChatSession | null {
   };
 }
 
-function normalizeMessage(raw: any): ChatMessage | null {
+function normalizeMessage(raw: any, fallbackSessionId?: number | null): ChatMessage | null {
   if (!raw || typeof raw !== "object") return null;
   const role = raw.role;
   if (role !== "user" && role !== "assistant" && role !== "system") return null;
@@ -242,7 +242,7 @@ function normalizeMessage(raw: any): ChatMessage | null {
     chatMessageId: raw.chatMessageId ? Number(raw.chatMessageId) : raw.messageId ? Number(raw.messageId) : undefined,
     tempId: typeof raw.tempId === "string" ? raw.tempId : undefined,
     userId: raw.userId ? Number(raw.userId) : undefined,
-    chatSessionId: raw.chatSessionId ? Number(raw.chatSessionId) : undefined,
+    chatSessionId: raw.chatSessionId ? Number(raw.chatSessionId) : fallbackSessionId ?? undefined,
     sessionTitle: typeof raw.sessionTitle === "string" ? raw.sessionTitle : undefined,
     activeRecipeId: toNullableNumber(raw.activeRecipeId),
     isSessionStart: Boolean(raw.isSessionStart),
@@ -259,7 +259,7 @@ function normalizeMessage(raw: any): ChatMessage | null {
   };
 }
 
-function normalizeMessages(raw: any): ChatMessage[] {
+function normalizeMessages(raw: any, fallbackSessionId?: number | null): ChatMessage[] {
   const source = Array.isArray(raw)
     ? raw
     : Array.isArray(raw?.items)
@@ -271,8 +271,98 @@ function normalizeMessages(raw: any): ChatMessage[] {
           : [];
 
   return source
-    .map((item: any) => normalizeMessage(item))
+    .map((item: any) => normalizeMessage(item, fallbackSessionId))
     .filter((item: ChatMessage | null): item is ChatMessage => Boolean(item));
+}
+
+function normalizeComparableContent(content: string): string {
+  return content.replace(/\s+/g, " ").trim();
+}
+
+function normalizeMessageMetaValue(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => normalizeMessageMetaValue(item)).join(",")}]`;
+  }
+
+  if (value && typeof value === "object") {
+    return normalizeMessageMeta(value as Record<string, unknown>);
+  }
+
+  return JSON.stringify(value ?? null);
+}
+
+function normalizeMessageMeta(meta: ChatMessageMeta | null | undefined): string {
+  if (!meta || typeof meta !== "object") return "";
+
+  return Object.keys(meta)
+    .sort()
+    .map((key) => `${key}:${normalizeMessageMetaValue(meta[key])}`)
+    .join("|");
+}
+
+function areMessagesSemanticallyEquivalent(first: ChatMessage, second: ChatMessage): boolean {
+  if (first.chatMessageId && second.chatMessageId && first.chatMessageId === second.chatMessageId) return true;
+  if (first.tempId && second.tempId && first.tempId === second.tempId) return true;
+
+  if (
+    first.chatSessionId !== undefined &&
+    first.chatSessionId !== null &&
+    second.chatSessionId !== undefined &&
+    second.chatSessionId !== null &&
+    first.chatSessionId !== second.chatSessionId
+  ) {
+    return false;
+  }
+  if (first.role !== second.role) return false;
+  if (normalizeComparableContent(first.content) !== normalizeComparableContent(second.content)) return false;
+  if ((first.activeRecipeId ?? null) !== (second.activeRecipeId ?? null)) return false;
+  if (Boolean(first.isSessionStart) !== Boolean(second.isSessionStart)) return false;
+  if (normalizeMessageMeta(first.meta) !== normalizeMessageMeta(second.meta)) return false;
+
+  const firstTime = new Date(first.createdAt).getTime();
+  const secondTime = new Date(second.createdAt).getTime();
+  if (!Number.isFinite(firstTime) || !Number.isFinite(secondTime)) return true;
+
+  return Math.abs(firstTime - secondTime) <= 10_000;
+}
+
+function mergeAssistantMessage(
+  messages: ChatMessage[],
+  rawAssistantMessage: unknown,
+  fallbackSessionId?: number | null,
+): ChatMessage[] {
+  const assistantMessage =
+    typeof rawAssistantMessage === "string" && rawAssistantMessage.trim()
+      ? normalizeMessage({
+          role: "assistant",
+          content: rawAssistantMessage.trim(),
+          createdAt: new Date().toISOString(),
+          chatSessionId: fallbackSessionId ?? undefined,
+        })
+      : normalizeMessage(rawAssistantMessage);
+
+  if (!assistantMessage) return messages;
+
+  if (messages.some((message) => areMessagesSemanticallyEquivalent(message, assistantMessage))) {
+    return messages;
+  }
+
+  return [...messages, assistantMessage];
+}
+
+function replaceSessionMessagesInTimeline(
+  timeline: ChatMessage[],
+  sessionId: number,
+  sessionMessages: ChatMessage[],
+): ChatMessage[] {
+  const nextTimeline = timeline.filter((message) => {
+    if (message.chatSessionId === sessionId) return false;
+    if (message.chatSessionId !== undefined && message.chatSessionId !== null) return true;
+
+    return !sessionMessages.some((sessionMessage) => areMessagesSemanticallyEquivalent(message, sessionMessage));
+  });
+
+  return mergeAndSortTimeline(nextTimeline, sessionMessages);
 }
 
 function normalizeMealPolicyPromptActionId(value: unknown): MealPolicyPromptActionId | null {
@@ -569,7 +659,7 @@ function mergeAndSortTimeline(current: ChatMessage[], incoming: ChatMessage[]): 
     map.set(key, previous ? { ...previous, ...message } : message);
   });
 
-  return Array.from(map.values()).sort((a, b) => {
+  const sorted = Array.from(map.values()).sort((a, b) => {
     const timeA = new Date(a.createdAt).getTime();
     const timeB = new Date(b.createdAt).getTime();
     if (timeA !== timeB) return timeA - timeB;
@@ -582,6 +672,24 @@ function mergeAndSortTimeline(current: ChatMessage[], incoming: ChatMessage[]): 
     const sessionB = b.chatSessionId ?? Number.MAX_SAFE_INTEGER;
     return sessionA - sessionB;
   });
+
+  return sorted.reduce<ChatMessage[]>((acc, message) => {
+    const previous = acc[acc.length - 1];
+    if (!previous || !areMessagesSemanticallyEquivalent(previous, message)) {
+      acc.push(message);
+      return acc;
+    }
+
+    acc[acc.length - 1] = {
+      ...previous,
+      ...message,
+      createdAt: previous.createdAt || message.createdAt,
+      chatMessageId: previous.chatMessageId ?? message.chatMessageId,
+      tempId: previous.tempId ?? message.tempId,
+      meta: previous.meta ?? message.meta,
+    };
+    return acc;
+  }, []);
 }
 
 function findPrimarySession(payload: any): ChatSession | null {
@@ -1068,7 +1176,7 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
     try {
       const res = await chatService.getSessionHistory(storedSessionId);
       const data = extractData(res);
-      const timeline = mergeAndSortTimeline([], normalizeMessages(data?.messages));
+      const timeline = mergeAndSortTimeline([], normalizeMessages(data?.messages, storedSessionId));
       const oldestLoadedMessageId =
         timeline.find((message) => Number.isFinite(message.chatMessageId) && Number(message.chatMessageId) > 0)?.chatMessageId ?? null;
 
@@ -1168,7 +1276,10 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
             try {
               const sessionHistoryResponse = await chatService.getSessionHistory(nextCurrentSession.chatSessionId);
               const sessionHistoryData = extractData(sessionHistoryResponse);
-              const sessionHistoryMessages = normalizeMessages(sessionHistoryData?.messages);
+              const sessionHistoryMessages = normalizeMessages(
+                sessionHistoryData?.messages,
+                nextCurrentSession.chatSessionId,
+              );
               const hydratedContext = buildMealContext({
                 payload: sessionHistoryResponse,
                 userId,
@@ -1177,7 +1288,11 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
               });
 
               mergeState({
-                timeline: mergeAndSortTimeline(stateRef.current.timeline, sessionHistoryMessages),
+                timeline: replaceSessionMessagesInTimeline(
+                  stateRef.current.timeline,
+                  nextCurrentSession.chatSessionId,
+                  sessionHistoryMessages,
+                ),
                 currentSessionId: hydratedContext.session?.chatSessionId ?? nextCurrentSession.chatSessionId,
                 currentSession: hydratedContext.session ?? stateRef.current.currentSession,
                 mealSession: hydratedContext.mealSession,
@@ -1326,17 +1441,15 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
           });
 
           const responseData = extractData(response);
-          const responseMessages = normalizeMessages(responseData);
-          const assistantMessage =
-            typeof responseData?.assistantMessage === "string" && responseData.assistantMessage.trim()
-              ? normalizeMessage({
-                  role: "assistant",
-                  content: responseData.assistantMessage.trim(),
-                  createdAt: new Date().toISOString(),
-                  chatSessionId: nextContext.session?.chatSessionId ?? stateRef.current.currentSessionId,
-                })
-              : null;
-          const mergedResponseMessages = assistantMessage ? [...responseMessages, assistantMessage] : responseMessages;
+          const responseMessages = normalizeMessages(
+            responseData,
+            nextContext.session?.chatSessionId ?? latestSessionId ?? latest.currentSession?.chatSessionId ?? null,
+          );
+          const mergedResponseMessages = mergeAssistantMessage(
+            responseMessages,
+            responseData?.assistantMessage,
+            nextContext.session?.chatSessionId ?? stateRef.current.currentSessionId,
+          );
 
           const targetSessionId = nextContext.session?.chatSessionId ?? null;
           if (!latestSessionId && targetSessionId) {
@@ -1345,7 +1458,7 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
                 limit: SESSION_CREATE_TIMELINE_LIMIT,
               });
               const timelineData = extractData(timelineResponse);
-              const createdSessionMessages = normalizeMessages(timelineData).filter(
+              const createdSessionMessages = normalizeMessages(timelineData, targetSessionId).filter(
                 (message) => message.chatSessionId === targetSessionId,
               );
               const introMessages = createdSessionMessages.filter(
@@ -1371,7 +1484,7 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
                 limit: SESSION_CREATE_TIMELINE_LIMIT,
               });
               const refreshedTimelineData = extractData(refreshedTimelineResponse);
-              const refreshedSessionMessages = normalizeMessages(refreshedTimelineData).filter(
+              const refreshedSessionMessages = normalizeMessages(refreshedTimelineData, targetSessionId).filter(
                 (message) => message.chatSessionId === targetSessionId,
               );
 
@@ -1710,8 +1823,8 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
         const response = await chatService.getSessionHistory(sessionId);
         const data = extractData(response);
         const session = normalizeSession(data?.session) ?? stateRef.current.currentSession;
-        const sessionMessages = normalizeMessages(data?.messages);
-        const nextTimeline = mergeAndSortTimeline(stateRef.current.timeline, sessionMessages);
+        const sessionMessages = normalizeMessages(data?.messages, sessionId);
+        const nextTimeline = replaceSessionMessagesInTimeline(stateRef.current.timeline, sessionId, sessionMessages);
         const nextContext = buildMealContext({
           payload: response,
           userId,
@@ -1797,9 +1910,12 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
           useUnifiedSession: current.mealSession.chatSessionId ? undefined : true,
         });
 
-        const responseData = extractData(responsePayload);
-        const responseMessages = normalizeMessages(responseData);
         const responseSession = findPrimarySession(responsePayload) ?? stateRef.current.currentSession;
+        const responseData = extractData(responsePayload);
+        const responseMessages = normalizeMessages(
+          responseData,
+          responseSession?.chatSessionId ?? current.mealSession.chatSessionId ?? current.currentSessionId ?? null,
+        );
         const mealPolicyPrompt = normalizeMealPolicyPromptPayload(responsePayload, responseData);
         let timeline = stateRef.current.timeline.map((item) =>
           item.tempId === optimisticTempId
@@ -1897,19 +2013,13 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
           return;
         }
 
-        const assistantMessage =
-          !mealPolicyPrompt &&
-          typeof responseData?.assistantMessage === "string" &&
-          responseData.assistantMessage.trim()
-            ? normalizeMessage({
-                role: "assistant",
-                content: responseData.assistantMessage.trim(),
-                createdAt: new Date().toISOString(),
-                chatSessionId: responseSession?.chatSessionId ?? stateRef.current.currentSessionId,
-              })
-            : null;
-
-        const mergedResponseMessages = assistantMessage ? [...responseMessages, assistantMessage] : responseMessages;
+        const mergedResponseMessages = !mealPolicyPrompt
+          ? mergeAssistantMessage(
+              responseMessages,
+              responseData?.assistantMessage,
+              responseSession?.chatSessionId ?? stateRef.current.currentSessionId,
+            )
+          : responseMessages;
         timeline = mergeAndSortTimeline(timeline, mergedResponseMessages);
 
         if (hasServerEchoedUserMessage(mergedResponseMessages, [cleanedMessage, outboundMessage])) {
@@ -2026,22 +2136,20 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
           }),
         );
 
-        const responseData = extractData(response);
-        const responseMessages = normalizeMessages(responseData);
         const responseSession = findPrimarySession(response) ?? stateRef.current.currentSession;
+        const responseData = extractData(response);
+        const responseMessages = normalizeMessages(
+          responseData,
+          responseSession?.chatSessionId ?? pending.chatSessionId ?? stateRef.current.currentSessionId ?? null,
+        );
         const nextPrompt = normalizeMealPolicyPromptPayload(response, responseData);
-        const assistantMessage =
-          !nextPrompt &&
-          typeof responseData?.assistantMessage === "string" &&
-          responseData.assistantMessage.trim()
-            ? normalizeMessage({
-                role: "assistant",
-                content: responseData.assistantMessage.trim(),
-                createdAt: new Date().toISOString(),
-                chatSessionId: responseSession?.chatSessionId ?? stateRef.current.currentSessionId,
-              })
-            : null;
-        const mergedResponseMessages = assistantMessage ? [...responseMessages, assistantMessage] : responseMessages;
+        const mergedResponseMessages = !nextPrompt
+          ? mergeAssistantMessage(
+              responseMessages,
+              responseData?.assistantMessage,
+              responseSession?.chatSessionId ?? stateRef.current.currentSessionId,
+            )
+          : responseMessages;
 
         let timeline = upsertMealPolicyPromptMessage({
           timeline: stateRef.current.timeline,
@@ -2235,19 +2343,17 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
         };
 
         const response = await enqueueMealMutation(async () => chatService.completeMealSession(payload));
-        const responseData = extractData(response);
-        const responseMessages = normalizeMessages(responseData);
         const responseSession = findPrimarySession(response) ?? stateRef.current.currentSession;
-        const assistantMessage =
-          typeof responseData?.assistantMessage === "string" && responseData.assistantMessage.trim()
-            ? normalizeMessage({
-                role: "assistant",
-                content: responseData.assistantMessage.trim(),
-                createdAt: new Date().toISOString(),
-                chatSessionId: responseSession?.chatSessionId ?? stateRef.current.currentSessionId,
-              })
-            : null;
-        const mergedCompletionMessages = assistantMessage ? [...responseMessages, assistantMessage] : responseMessages;
+        const responseData = extractData(response);
+        const responseMessages = normalizeMessages(
+          responseData,
+          responseSession?.chatSessionId ?? chatSessionId ?? stateRef.current.currentSessionId ?? null,
+        );
+        const mergedCompletionMessages = mergeAssistantMessage(
+          responseMessages,
+          responseData?.assistantMessage,
+          responseSession?.chatSessionId ?? stateRef.current.currentSessionId,
+        );
         const nextContext = buildMealContext({
           payload: response,
           userId,
