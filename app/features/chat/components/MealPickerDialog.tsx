@@ -202,7 +202,7 @@ export default function MealPickerDialog({
                               onClick={() => onSetPrimaryRecipe(item.recipeId)}
                               className="rounded-[1rem] bg-[#fff1da] px-3 py-2.5 text-[13px] font-black text-[#f26f12] shadow-sm disabled:cursor-not-allowed disabled:opacity-60"
                             >
-                              {isPrimary ? "Đang ưu tiên" : "Ưu tiên hiện tại"}
+                              {isPrimary ? "Đang ưu tiên" : "Ưu tiên món này"}
                             </button>
                           </div>
 
