@@ -1,0 +1,11 @@
+services:
+  chefmate-web-client:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: chefmate-web-client
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "13080:3000"

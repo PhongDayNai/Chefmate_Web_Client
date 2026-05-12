@@ -10,3 +10,11 @@
 
 # TypeScript
 *.tsbuildinfo
+
+# Environment & generated
+.next/
+next-env.d.ts
+package-lock.json
+
+# Docs (don't commit)
+docs/
