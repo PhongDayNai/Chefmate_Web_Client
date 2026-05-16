@@ -21,6 +21,7 @@ import ChatContextCard from "~/features/chat/components/ChatContextCard";
 import ChatMessageBubble from "~/features/chat/components/ChatMessageBubble";
 import CompleteMealDialog from "~/features/chat/components/CompleteMealDialog";
 import MealPickerDialog from "~/features/chat/components/MealPickerDialog";
+import PantryPickerCard from "~/features/chat/components/PantryPickerCard";
 import PendingPrimarySwitchDialog from "~/features/chat/components/PendingPrimarySwitchDialog";
 import SelectedRecipesDialog from "~/features/chat/components/SelectedRecipesDialog";
 
@@ -86,6 +87,13 @@ export default function ChatPage() {
     handleConfirmCompleteSession,
     handleConfirmPendingPrimarySwitch,
     handleClosePendingPrimarySwitch,
+    pantries,
+    pantryLoading,
+    pantrySwitching,
+    canChangePantry,
+    currentPantryId,
+    handleSelectPantryFromContext,
+    handleStartChatWithPantry,
   } = useChatViewModel({
     ensureAuth: requireAuth,
     recipeIdParam,
@@ -150,6 +158,12 @@ export default function ChatPage() {
             showActions={showContextActions}
             canComplete={canCompleteSession}
             canMutateMeal={canMutateMeal}
+            pantries={pantries}
+            pantryId={currentPantryId}
+            pantryLoading={pantryLoading}
+            pantrySwitching={pantrySwitching}
+            canChangePantry={canChangePantry}
+            onSelectPantry={(pid) => void handleSelectPantryFromContext(pid)}
             onToggleActions={() => setShowContextActions((prev) => !prev)}
             onOpenMealPicker={() => void handleOpenRecipePicker()}
             onOpenDietNotes={() => void handleOpenDietModal()}
@@ -173,12 +187,12 @@ export default function ChatPage() {
 
           {state.timeline.length === 0 && !state.loadingTimeline ? (
             <div className="flex h-full items-center justify-center">
-              <div className="max-w-xl rounded-[1.8rem] border border-[#eadbc1] bg-[#f7e7cf] p-6 text-[#1f2937] shadow-sm">
-                <p className="text-2xl font-black text-[#f57a14]">Bepes</p>
-                <p className="mt-3 text-[30px] font-bold leading-snug">Nhấn gửi để bắt đầu cuộc trò chuyện với Bepes.</p>
-                <p className="mt-2 text-lg leading-relaxed text-[#344455]">
-                  Mình sẽ bám theo meal session hiện tại, thứ tự món đã chọn và ghi chú ăn uống của bạn.
-                </p>
+              <div className="w-full max-w-xl">
+                <PantryPickerCard
+                  activePantryId={currentPantryId}
+                  description="Chọn tủ lạnh để Bepes biết bạn đang có gì, hoặc chat tự do nếu chưa cần."
+                  onSelect={(pid) => handleStartChatWithPantry(pid)}
+                />
               </div>
             </div>
           ) : null}

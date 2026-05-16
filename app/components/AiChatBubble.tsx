@@ -11,6 +11,7 @@ import ChatContextCard from "~/features/chat/components/ChatContextCard";
 import ChatMessageBubble from "~/features/chat/components/ChatMessageBubble";
 import CompleteMealDialog from "~/features/chat/components/CompleteMealDialog";
 import MealPickerDialog from "~/features/chat/components/MealPickerDialog";
+import PantryPickerCard from "~/features/chat/components/PantryPickerCard";
 import PendingPrimarySwitchDialog from "~/features/chat/components/PendingPrimarySwitchDialog";
 import SelectedRecipesDialog from "~/features/chat/components/SelectedRecipesDialog";
 import { checkAuth, getAuthUser } from "~/utils/authUtils";
@@ -92,6 +93,13 @@ export default function AiChatBubble() {
     handleConfirmCompleteSession,
     handleConfirmPendingPrimarySwitch,
     handleClosePendingPrimarySwitch,
+    pantries,
+    pantryLoading,
+    pantrySwitching,
+    canChangePantry,
+    currentPantryId,
+    handleSelectPantryFromContext,
+    handleStartChatWithPantry,
   } = useChatViewModel({
     ensureAuth: () => Boolean(ensureLoggedIn()),
     bootstrapWhen: isOpen,
@@ -235,6 +243,12 @@ export default function AiChatBubble() {
               showActions={showContextActions}
               canComplete={canCompleteSession}
               canMutateMeal={canMutateMeal}
+              pantries={pantries}
+              pantryId={currentPantryId}
+              pantryLoading={pantryLoading}
+              pantrySwitching={pantrySwitching}
+              canChangePantry={canChangePantry}
+              onSelectPantry={(pid) => void handleSelectPantryFromContext(pid)}
               onToggleActions={() => setShowContextActions((prev) => !prev)}
               onOpenMealPicker={() => void handleOpenRecipePicker()}
               onOpenDietNotes={() => void handleOpenDietModal()}
@@ -251,7 +265,12 @@ export default function AiChatBubble() {
             ) : null}
 
             {state.timeline.length === 0 && !state.sending && !state.loadingTimeline ? (
-              <div className="pt-12 text-center text-sm text-gray-400">Nhấn gửi để bắt đầu cuộc trò chuyện với Bepes.</div>
+              <PantryPickerCard
+                compact
+                activePantryId={currentPantryId}
+                description="Chọn tủ lạnh để Bepes biết bạn đang có gì, hoặc chat tự do nếu chưa cần."
+                onSelect={(pid) => handleStartChatWithPantry(pid)}
+              />
             ) : (
               state.timeline.map((msg, idx) => {
                 const renderKey = msg.chatMessageId
