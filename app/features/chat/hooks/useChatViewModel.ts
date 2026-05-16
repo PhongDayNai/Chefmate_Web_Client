@@ -13,8 +13,10 @@ import type {
   MealRecipeStatus,
   MealRemainingStatus,
 } from "~/features/chat/types";
+import type { PantryType } from "~/features/pantry/types";
 import { useChatFlow } from "~/features/chat/state/ChatFlowProvider";
 import { recipeService } from "~/features/recipes/api/recipeService";
+import { pantryService } from "~/features/pantry/api/pantryService";
 import type { MealPickerGroup } from "~/features/chat/components/MealPickerDialog";
 import { checkAuth, getAuthUserId } from "~/utils/authUtils";
 export const CHAT_SCROLL_TOP_LOAD_THRESHOLD = 80;
@@ -100,6 +102,8 @@ export function useChatViewModel({
     confirmPendingPrimarySwitch,
     clearPendingPrimarySwitch,
     completeCurrentSession,
+    createChatWithPantry,
+    attachPantryToCurrentSession,
   } = useChatFlow();
 
   const [input, setInput] = useState("");
@@ -115,6 +119,9 @@ export function useChatViewModel({
   const [recipeCache, setRecipeCache] = useState<Record<number, any>>({});
   const [loadingRecipes, setLoadingRecipes] = useState(false);
   const [retryNow, setRetryNow] = useState(Date.now());
+  const [pantries, setPantries] = useState<PantryType[]>([]);
+  const [pantryLoading, setPantryLoading] = useState(false);
+  const [pantrySwitching, setPantrySwitching] = useState(false);
 
   const nearBottomRef = useRef(true);
   const bootstrappingRef = useRef(false);
@@ -129,6 +136,33 @@ export function useChatViewModel({
 
   const userId = resolvedUserId;
   const isLoggedIn = checkAuth();
+
+  // Load the user's pantries once they're authenticated so the picker has data.
+  useEffect(() => {
+    if (!isLoggedIn) {
+      setPantries([]);
+      return;
+    }
+    let cancelled = false;
+    setPantryLoading(true);
+    pantryService
+      .getPantries()
+      .then((res) => {
+        if (cancelled) return;
+        if (res?.success && Array.isArray(res.data)) {
+          setPantries(res.data);
+        }
+      })
+      .catch(() => {
+        // ignore - pantry list is optional
+      })
+      .finally(() => {
+        if (!cancelled) setPantryLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isLoggedIn]);
 
   const recommendationGroups = useMemo<MealPickerGroup[]>(
     () => [
@@ -534,6 +568,58 @@ export function useChatViewModel({
     clearPendingPrimarySwitch();
   }, [clearPendingPrimarySwitch]);
 
+  // Pantry picker handlers
+  const handleSelectPantryFromContext = useCallback(
+    async (pantryId: number | null) => {
+      const uid = ensureUserId();
+      if (!uid) return false;
+      // If we don't have a session yet, create one. Otherwise patch existing.
+      const hasSession = Boolean(state.currentSession?.chatSessionId || state.currentSessionId);
+      setPantrySwitching(true);
+      try {
+        const ok = hasSession
+          ? await attachPantryToCurrentSession(pantryId)
+          : await createChatWithPantry(pantryId);
+        if (ok) {
+          // Refresh recommendations so the meal picker reflects the new pantry
+          // before the user opens it again.
+          void refreshRecommendations();
+        }
+        return ok;
+      } finally {
+        setPantrySwitching(false);
+      }
+    },
+    [
+      attachPantryToCurrentSession,
+      createChatWithPantry,
+      ensureUserId,
+      refreshRecommendations,
+      state.currentSession,
+      state.currentSessionId,
+    ],
+  );
+
+  const handleStartChatWithPantry = useCallback(
+    async (pantryId: number | null) => {
+      const uid = ensureUserId();
+      if (!uid) return false;
+      setPantrySwitching(true);
+      try {
+        const ok = await createChatWithPantry(pantryId);
+        if (ok) {
+          void refreshRecommendations();
+        }
+        return ok;
+      } finally {
+        setPantrySwitching(false);
+      }
+    },
+    [createChatWithPantry, ensureUserId, refreshRecommendations],
+  );
+
+  const canChangePantry = !state.mealSyncing && !state.sending && state.mealItems.length === 0;
+
   return {
     state,
     userId,
@@ -589,5 +675,13 @@ export function useChatViewModel({
     handleConfirmCompleteSession,
     handleConfirmPendingPrimarySwitch,
     handleClosePendingPrimarySwitch,
+    // Pantry picker
+    pantries,
+    pantryLoading,
+    pantrySwitching,
+    canChangePantry,
+    currentPantryId: state.currentSession?.pantryId ?? null,
+    handleSelectPantryFromContext,
+    handleStartChatWithPantry,
   };
 }
