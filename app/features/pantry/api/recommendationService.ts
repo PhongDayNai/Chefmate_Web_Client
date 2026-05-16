@@ -1,15 +1,49 @@
 // app/features/pantry/api/recommendationService.ts
 import apiClient from "~/lib/apiClient";
 import { buildApiUrl } from "~/lib/apiConfig";
+import { getAuthUserId } from "~/utils/authUtils";
 import type { Recommendation, RecommendationPayload } from "../types";
 
 const BASE_URL = buildApiUrl("/v2/recommendations");
 
+export type PersonalizedContext =
+  | "normal"
+  | "pantry_first"
+  | "balance_recovery"
+  | "quick_meal"
+  | "light";
+
+export interface PersonalizedOptions {
+  pantryId?: number;
+  limit?: number;
+  /**
+   * Optional explicit context. If omitted, BE picks one automatically (mode="auto").
+   * Only pass when the user has explicitly selected a context in the UI.
+   */
+  context?: PersonalizedContext;
+  /** Override userId. Defaults to the currently logged-in user. */
+  userId?: number;
+}
+
 export const recommendationService = {
-  getPersonalized: async (pantryId?: number, limit: number = 10): Promise<RecommendationPayload> => {
+  getPersonalized: async (
+    pantryIdOrOptions?: number | PersonalizedOptions,
+    legacyLimit?: number,
+  ): Promise<RecommendationPayload> => {
+    // Backwards-compatible: support `getPersonalized(pantryId, limit)` and `getPersonalized({ ... })`.
+    const opts: PersonalizedOptions =
+      typeof pantryIdOrOptions === "object" && pantryIdOrOptions !== null
+        ? pantryIdOrOptions
+        : { pantryId: pantryIdOrOptions, limit: legacyLimit };
+
     const params: Record<string, string> = {};
-    if (pantryId) params.pantryId = pantryId.toString();
-    params.limit = limit.toString();
+    const userId = opts.userId ?? getAuthUserId();
+    if (userId) params.userId = String(userId);
+    if (opts.pantryId) params.pantryId = String(opts.pantryId);
+    params.limit = String(opts.limit ?? 10);
+    // Only attach `context` when the caller explicitly chose one. Skipping it lets
+    // BE auto-detect (appliedContext.mode = "auto") which is the desired default.
+    if (opts.context) params.context = opts.context;
 
     const res = await apiClient.get(`${BASE_URL}/personalized`, { params });
     // API may return either `{ success, data: {...} }` or the payload at the root.
