@@ -1,6 +1,19 @@
 "use client";
 
-import { BookOpenText, CheckCircle2, ChevronUp, LockKeyhole, NotebookPen, Soup, Target, UtensilsCrossed } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import {
+  BookOpenText,
+  CheckCircle2,
+  ChevronDown,
+  ChevronUp,
+  LockKeyhole,
+  NotebookPen,
+  Refrigerator,
+  Soup,
+  Target,
+  UtensilsCrossed,
+} from "lucide-react";
+import type { PantryType } from "~/features/pantry/types";
 
 interface Props {
   compact?: boolean;
@@ -12,6 +25,14 @@ interface Props {
   showActions: boolean;
   canComplete: boolean;
   canMutateMeal: boolean;
+  // Pantry context
+  pantries: PantryType[];
+  pantryId: number | null;
+  pantryLoading?: boolean;
+  pantrySwitching?: boolean;
+  /** Whether the user can change the pantry right now (false in V2 meal mid-flow). */
+  canChangePantry: boolean;
+  onSelectPantry: (pantryId: number | null) => void;
   onToggleActions: () => void;
   onOpenMealPicker: () => void;
   onOpenDietNotes: () => void;
@@ -43,12 +64,32 @@ export default function ChatContextCard({
   showActions,
   canComplete,
   canMutateMeal,
+  pantries,
+  pantryId,
+  pantryLoading = false,
+  pantrySwitching = false,
+  canChangePantry,
+  onSelectPantry,
   onToggleActions,
   onOpenMealPicker,
   onOpenDietNotes,
   onOpenRecipes,
   onOpenComplete,
 }: Props) {
+  const [pantryMenuOpen, setPantryMenuOpen] = useState(false);
+  const pantryMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!pantryMenuOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (pantryMenuRef.current && !pantryMenuRef.current.contains(e.target as Node)) {
+        setPantryMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [pantryMenuOpen]);
+
   const baseButtonClass = compact
     ? "rounded-xl px-2 py-2 text-[11px] font-black transition hover:brightness-95"
     : "rounded-[1rem] px-3 py-2.5 text-[14px] font-black transition hover:brightness-95 sm:rounded-[1.1rem] sm:px-3.5 sm:py-2.5 sm:text-[15px]";
@@ -56,6 +97,11 @@ export default function ChatContextCard({
 
   const quickActionClass =
     "flex h-8 w-8 items-center justify-center rounded-full border bg-white shadow-sm transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-50";
+
+  const activePantry = pantries.find((p) => p.pantryId === pantryId) || null;
+  const pantryLabel = activePantry?.name || (pantryId == null ? "Chưa chọn" : `#${pantryId}`);
+
+  const pantryButtonDisabled = !canChangePantry || pantryLoading || pantrySwitching;
 
   return (
     <div className={`rounded-2xl border border-[#efe3d1] bg-[#fbf3e7] ${compact ? "p-2.5" : "rounded-[1.45rem] p-3"}`}>
@@ -67,6 +113,88 @@ export default function ChatContextCard({
           <p className={`${compact ? "mt-0.5 text-[11px]" : "mt-1 text-[12px] sm:text-[13px]"} truncate font-semibold leading-snug text-gray-700`}>
             Ghi chú: <span className="font-black text-gray-900">{dietSummary}</span>
           </p>
+
+          <div className="relative mt-1.5" ref={pantryMenuRef}>
+            <button
+              type="button"
+              disabled={pantryButtonDisabled}
+              onClick={() => setPantryMenuOpen((v) => !v)}
+              className={`flex w-full items-center justify-between gap-2 rounded-lg bg-white/70 px-2.5 py-1.5 text-left transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60 ${
+                compact ? "text-[11px]" : "text-[12px] sm:text-[13px]"
+              }`}
+              title={
+                canChangePantry
+                  ? "Đổi tủ lạnh đang gắn với phiên chat"
+                  : "Không thể đổi tủ trong khi đang trong phiên nấu"
+              }
+            >
+              <span className="flex min-w-0 items-center gap-1.5 font-semibold text-gray-700">
+                <Refrigerator size={compact ? 12 : 13} className="flex-shrink-0 text-[#f59127]" />
+                <span className="truncate">
+                  Tủ lạnh: <span className="font-black text-gray-900">{pantrySwitching ? "Đang đổi..." : pantryLabel}</span>
+                </span>
+              </span>
+              <ChevronDown
+                size={compact ? 12 : 13}
+                className={`flex-shrink-0 text-gray-400 transition-transform ${pantryMenuOpen ? "rotate-180" : ""}`}
+              />
+            </button>
+
+            {pantryMenuOpen ? (
+              <div className="absolute left-0 right-0 top-full z-30 mt-1 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-lg">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPantryMenuOpen(false);
+                    onSelectPantry(null);
+                  }}
+                  className={`flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-[12px] transition hover:bg-orange-50 ${
+                    pantryId === null ? "bg-orange-50 text-[#f59127]" : "text-gray-700"
+                  }`}
+                >
+                  <span className="font-semibold">Không gắn tủ lạnh</span>
+                  <span className="text-[10px] text-gray-400">Hỏi đáp tự do</span>
+                </button>
+
+                {pantries
+                  .filter((p) => p.userRole !== "viewer")
+                  .map((p) => (
+                    <button
+                      key={p.pantryId}
+                      type="button"
+                      onClick={() => {
+                        setPantryMenuOpen(false);
+                        onSelectPantry(p.pantryId);
+                      }}
+                      className={`flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-[12px] transition hover:bg-orange-50 ${
+                        pantryId === p.pantryId ? "bg-orange-50 text-[#f59127]" : "text-gray-700"
+                      }`}
+                    >
+                      <span className="truncate font-semibold">{p.name}</span>
+                      <span className="ml-2 text-[10px] text-gray-400">
+                        {p.itemCount} món · {p.userRole === "owner" ? "Sở hữu" : "Chỉnh sửa"}
+                      </span>
+                    </button>
+                  ))}
+
+                {pantries
+                  .filter((p) => p.userRole === "viewer")
+                  .map((p) => (
+                    <div
+                      key={`view-${p.pantryId}`}
+                      className="flex w-full items-center justify-between gap-2 px-3 py-2 text-[11px] text-gray-400"
+                      title="Chỉ xem - không thể dùng để chat"
+                    >
+                      <span className="flex min-w-0 items-center gap-1.5">
+                        <LockKeyhole size={11} />
+                        <span className="truncate">{p.name}</span>
+                      </span>
+                      <span className="text-[10px]">Chỉ xem</span>
+                    </div>
+                  ))}
+              </div>
+            ) : null}
+          </div>
 
           <div className={`mt-2 flex flex-wrap items-center gap-1.5 ${compact ? "text-[10px]" : "text-[11px]"}`}>
             {!uiClosed ? (
