@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { recipeService } from "~/features/recipes/api/recipeService";
 import RecipeList from "~/features/recipes/components/RecipeList";
+import HomeRecommendations from "~/features/recipes/components/HomeRecommendations";
 import type { Recipe, TrendingPeriod } from "~/features/recipes/types";
 import { getAuthUser } from "~/utils/authUtils";
 
@@ -132,6 +133,8 @@ export default function Home() {
           ))}
         </div>
       </div>
+
+      <HomeRecommendations />
 
       <RecipeList recipes={recipes} title="Món ăn dành cho bạn" isLoading={isInitialLoading} />
 

@@ -18,7 +18,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap"
         />
       </head>
-      <body>
+      <body suppressHydrationWarning>
         <Toaster position="top-center" reverseOrder={false} />
         {children}
       </body>

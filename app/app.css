@@ -21,3 +21,12 @@ input::placeholder,
 textarea::placeholder {
   color: #9ca3af;
 }
+
+/* Hide horizontal scrollbar for recommendation rails while keeping scroll functional. */
+.scrollbar-hide {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}

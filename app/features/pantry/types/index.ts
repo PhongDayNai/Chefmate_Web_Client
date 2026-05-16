@@ -28,3 +28,39 @@ export interface ShareType {
   role: "viewer" | "editor";
   sharedAt: string;
 }
+
+// ============ RECOMMENDATION TYPES ============
+
+export interface MissingIngredient {
+  ingredientName: string;
+  need: number | null;
+  have: number | null;
+  unit: string | null;
+}
+
+export interface Recommendation {
+  index?: number;
+  recommendationType: string;
+  recipeId: number;
+  recipeName: string;
+  image?: string;
+  cookingTime?: string;
+  ration?: number;
+  completionRate?: number;
+  missing?: MissingIngredient[];
+  score?: number;
+  reasons?: string[];
+  scoreBreakdown?: Record<string, number>;
+}
+
+export interface RecommendationPayload {
+  recommendationLimit: number;
+  recommendations: Recommendation[];
+  readyToCook: Recommendation[];
+  almostReady: Recommendation[];
+  context?: string;
+  appliedContext?: Record<string, unknown>;
+  profileConfidence?: number;
+  insights?: Record<string, unknown>[];
+  items: Recommendation[];
+}

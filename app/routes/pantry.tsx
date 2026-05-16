@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { pantryService } from "~/features/pantry/api/pantryService";
 import PantryItem from "~/features/pantry/components/PantryItem";
 import AddIngredientModal from "~/features/pantry/components/AddIngredientModal";
+import TodayEatCard from "~/features/pantry/components/TodayEatCard";
 import { useAuthGuard } from "~/hooks/useAuthGuard";
 import { Plus, Refrigerator, ChevronLeft, ChevronDown, Share2, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -314,6 +315,10 @@ export default function PantryPage() {
             </div>
           ) : (
             <>
+              {activePantry && (
+                <TodayEatCard pantryId={activePantry.pantryId} />
+              )}
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {items.map((item) => (
                   <PantryItem key={item.pantryItemId} item={item} onDelete={handleDelete} canDelete={canEdit} />
