@@ -40,6 +40,7 @@ import type {
 import { dietNoteService } from "~/features/users/api/dietNoteService";
 import { pantryService } from "~/features/pantry/api/pantryService";
 import { recipeService } from "~/features/recipes/api/recipeService";
+import { recommendationService } from "~/features/pantry/api/recommendationService";
 import { getAuthUserId } from "~/utils/authUtils";
 
 const DEFAULT_LIMIT = 32;
@@ -147,6 +148,16 @@ interface ChatFlowContextValue {
   updateMealRecipeStatus: (payload: UpdateMealStatusOptions) => Promise<boolean>;
   confirmPendingPrimarySwitch: (nextPrimaryRecipeId: number) => Promise<boolean>;
   completeCurrentSession: (options?: CompleteMealOptions) => Promise<boolean>;
+  /**
+   * Create a brand-new V1 chat session bound to the given pantry. Pass `null`
+   * for a generic chat without pantry context.
+   */
+  createChatWithPantry: (pantryId: number | null, title?: string) => Promise<boolean>;
+  /**
+   * Attach (or detach with `null`) a pantry to the currently open session.
+   * Falls back to creating a new V1 session if there is no current session.
+   */
+  attachPantryToCurrentSession: (pantryId: number | null) => Promise<boolean>;
 }
 
 const ChatFlowContext = createContext<ChatFlowContextValue | undefined>(undefined);
@@ -220,9 +231,28 @@ function normalizeSession(raw: any): ChatSession | null {
   const chatSessionId = Number(raw.chatSessionId);
   if (!Number.isFinite(chatSessionId) || chatSessionId <= 0) return null;
 
+  const pantryIdRaw = raw.pantryId;
+  const pantryId =
+    pantryIdRaw === null || pantryIdRaw === undefined
+      ? null
+      : Number.isFinite(Number(pantryIdRaw))
+        ? Number(pantryIdRaw)
+        : null;
+
+  const flow = raw.flow === "meal" || raw.flow === "general" ? raw.flow : undefined;
+  const mealStatus =
+    raw.mealStatus === "active" || raw.mealStatus === "completed"
+      ? raw.mealStatus
+      : raw.mealStatus === null
+        ? null
+        : undefined;
+
   return {
     chatSessionId,
     userId: raw.userId ? Number(raw.userId) : undefined,
+    pantryId,
+    flow,
+    mealStatus,
     title: typeof raw.title === "string" && raw.title.trim() ? raw.title.trim() : "Bepes",
     activeRecipeId: toNullableNumber(raw.activeRecipeId),
     createdAt: typeof raw.createdAt === "string" ? raw.createdAt : undefined,
@@ -517,6 +547,32 @@ function normalizeTrendingRecipes(raw: unknown): ChatRecommendation[] {
         missingIngredients: undefined,
       }),
     )
+    .filter((item): item is ChatRecommendation => Boolean(item));
+}
+
+/**
+ * Map a personalized recommendation item (from /v2/recommendations/personalized)
+ * onto the lighter ChatRecommendation shape used by the meal picker dialog.
+ */
+function normalizePersonalizedRecipes(raw: unknown): ChatRecommendation[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((item: any) => {
+      const missing = Array.isArray(item?.missing) ? item.missing : [];
+      const missingNames = missing
+        .map((m: any) => (typeof m?.ingredientName === "string" ? m.ingredientName : null))
+        .filter((value: string | null): value is string => Boolean(value));
+      return normalizeRecommendation({
+        ...item,
+        recipeId: item?.recipeId,
+        recipeName: item?.recipeName,
+        imageUrl: item?.image,
+        ration: item?.ration,
+        cookingTime: item?.cookingTime,
+        missingIngredientsCount: missingNames.length || undefined,
+        missingIngredients: missingNames.length ? missingNames : undefined,
+      });
+    })
     .filter((item): item is ChatRecommendation => Boolean(item));
 }
 
@@ -1054,21 +1110,30 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
     const userId = getUserId();
     if (!userId) return;
 
+    const sessionPantryId = stateRef.current.currentSession?.pantryId ?? null;
+
     try {
-      const [res, trendingRes] = await Promise.all([
-        chatService.getRecommendations(12),
+      const [recoPayload, trendingRes] = await Promise.all([
+        recommendationService.getPersonalized({
+          pantryId: sessionPantryId ?? undefined,
+          limit: 12,
+          userId,
+        }),
         recipeService.getTrendingV2({
           page: 1,
           limit: 12,
           period: "all",
         }),
       ]);
-      const data = extractData(res) || {};
       const trendingItems = Array.isArray(trendingRes?.data?.items) ? trendingRes.data.items : [];
+      const sourceItems = recoPayload.items ?? [];
+      const readyItems = recoPayload.readyToCook?.length ? recoPayload.readyToCook : [];
+      const almostItems = recoPayload.almostReady?.length ? recoPayload.almostReady : [];
+
       mergeState({
-        recommendations: normalizeRecommendations(data.recommendations),
-        readyToCook: normalizeRecommendations(data.readyToCook),
-        almostReady: normalizeRecommendations(data.almostReady),
+        recommendations: normalizePersonalizedRecipes(sourceItems),
+        readyToCook: normalizePersonalizedRecipes(readyItems),
+        almostReady: normalizePersonalizedRecipes(almostItems),
         unavailable: normalizeTrendingRecipes(trendingItems),
       });
     } catch {
@@ -1092,11 +1157,17 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
     const userId = getUserId();
     if (!userId) return;
 
+    const sessionPantryId = stateRef.current.currentSession?.pantryId ?? null;
+
     try {
-      const [dietRes, pantryRes, recommendationRes, trendingRes] = await Promise.all([
+      const [dietRes, pantryRes, recoPayload, trendingRes] = await Promise.all([
         dietNoteService.getNotes(),
         pantryService.getMine(),
-        chatService.getRecommendations(12),
+        recommendationService.getPersonalized({
+          pantryId: sessionPantryId ?? undefined,
+          limit: 12,
+          userId,
+        }),
         recipeService.getTrendingV2({
           page: 1,
           limit: 12,
@@ -1104,14 +1175,17 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
         }),
       ]);
 
-      const recommendationData = extractData(recommendationRes) || {};
       const trendingItems = Array.isArray(trendingRes?.data?.items) ? trendingRes.data.items : [];
+      const sourceItems = recoPayload.items ?? [];
+      const readyItems = recoPayload.readyToCook?.length ? recoPayload.readyToCook : [];
+      const almostItems = recoPayload.almostReady?.length ? recoPayload.almostReady : [];
+
       mergeState({
         dietNotes: normalizeDietNotes(dietRes?.data),
         pantryItems: normalizePantryItems(pantryRes?.data),
-        recommendations: normalizeRecommendations(recommendationData.recommendations),
-        readyToCook: normalizeRecommendations(recommendationData.readyToCook),
-        almostReady: normalizeRecommendations(recommendationData.almostReady),
+        recommendations: normalizePersonalizedRecipes(sourceItems),
+        readyToCook: normalizePersonalizedRecipes(readyItems),
+        almostReady: normalizePersonalizedRecipes(almostItems),
         unavailable: normalizeTrendingRecipes(trendingItems),
       });
     } catch {
@@ -1126,7 +1200,7 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
     mergeState({ loadingSessions: true });
 
     try {
-      const res = await chatService.listSessions(1, 50);
+      const res = await chatService.listSessions(1, 50, userId);
       const data = extractData(res);
       const rawItems = Array.isArray(data?.items) ? data.items : Array.isArray(data) ? data : [];
       const sessions = rawItems
@@ -1411,9 +1485,14 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
           let response: any;
           let nextTimeline = stateRef.current.timeline;
           if (!latestSessionId && normalizedItems.length > 0) {
+            // Inherit pantryId from the V1 session the user was chatting in so
+            // the new meal session keeps the same ingredient context.
+            const inheritedPantryId =
+              current.currentSession?.pantryId ?? latest.currentSession?.pantryId ?? null;
             response = await chatService.createMealSession({
               title: current.currentSession?.title || latest.currentSession?.title || "Bepes",
               recipeIds: normalizedItems.map((item) => item.recipeId),
+              pantryId: inheritedPantryId,
             });
           } else if (latestSessionId) {
             response = await chatService.replaceMealRecipes({
@@ -1582,9 +1661,12 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
 
         await enqueueMealMutation(async () => {
           if (!sessionId) {
+            const inheritedPantryId =
+              fallbackSession?.pantryId ?? current.currentSession?.pantryId ?? null;
             const createRes = await chatService.createMealSession({
               title: fallbackSession?.title || "Bepes",
               recipeIds: current.mealItems.map((item) => item.recipeId),
+              pantryId: inheritedPantryId,
             });
             const createdContext = buildMealContext({
               payload: createRes,
@@ -1872,9 +1954,21 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      const outboundMessage = buildFocusedMessage(cleanedMessage, current.mealSession, current.mealItems);
+      // Decide which flow this message belongs to.
+      // If the active session is in V2 meal flow (has selected recipes or backend
+      // labelled flow=meal) we must keep using the V2 endpoint. Otherwise it's a
+      // plain V1 chat — even when the session has been completed previously, we
+      // simply continue in V1 mode.
+      const isMealFlow =
+        current.mealItems.length > 0 ||
+        current.currentSession?.flow === "meal" ||
+        Boolean(current.mealSession.chatSessionId && current.mealSession.activeRecipeId);
+      const outboundMessage = isMealFlow
+        ? buildFocusedMessage(cleanedMessage, current.mealSession, current.mealItems)
+        : cleanedMessage;
 
-      if (current.mealSession.uiClosed) {
+      // Only meal flow can be "completed" (locks the composer).
+      if (isMealFlow && current.mealSession.uiClosed) {
         setError("Phiên nấu hiện tại đã hoàn tất. Hãy chọn món mới để bắt đầu tiếp.");
         return;
       }
@@ -1904,11 +1998,41 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
       });
 
       try {
-        const responsePayload = await chatService.sendV2Message({
-          chatSessionId: current.mealSession.chatSessionId ?? undefined,
-          message: outboundMessage,
-          useUnifiedSession: current.mealSession.chatSessionId ? undefined : true,
-        });
+        // Ensure we have a session for V1 chat. If the user starts typing without
+        // ever picking a pantry, create a pantry-less general session on the fly so
+        // BE can persist the conversation history.
+        let activeSessionId = isMealFlow
+          ? current.mealSession.chatSessionId
+          : current.currentSessionId ?? current.currentSession?.chatSessionId ?? null;
+
+        if (!isMealFlow && !activeSessionId) {
+          const createRes = await chatService.createSession({
+            userId,
+            pantryId: null,
+            title: "Trò chuyện với Bepes",
+          });
+          const createdSession = normalizeSession(extractData(createRes));
+          if (createdSession?.chatSessionId) {
+            activeSessionId = createdSession.chatSessionId;
+            mergeState({
+              currentSessionId: createdSession.chatSessionId,
+              currentSession: createdSession,
+              sessions: [createdSession, ...stateRef.current.sessions],
+            });
+            persistLastSession(createdSession.chatSessionId, userId);
+          }
+        }
+
+        const responsePayload = isMealFlow
+          ? await chatService.sendV2Message({
+              chatSessionId: current.mealSession.chatSessionId ?? undefined,
+              message: outboundMessage,
+              useUnifiedSession: current.mealSession.chatSessionId ? undefined : true,
+            })
+          : await chatService.sendV1Message({
+              chatSessionId: activeSessionId ?? undefined,
+              message: outboundMessage,
+            });
 
         const responseSession = findPrimarySession(responsePayload) ?? stateRef.current.currentSession;
         const responseData = extractData(responsePayload);
@@ -1916,7 +2040,7 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
           responseData,
           responseSession?.chatSessionId ?? current.mealSession.chatSessionId ?? current.currentSessionId ?? null,
         );
-        const mealPolicyPrompt = normalizeMealPolicyPromptPayload(responsePayload, responseData);
+        const mealPolicyPrompt = isMealFlow ? normalizeMealPolicyPromptPayload(responsePayload, responseData) : null;
         let timeline = stateRef.current.timeline.map((item) =>
           item.tempId === optimisticTempId
             ? {
@@ -2317,6 +2441,133 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
     [sendMessage],
   );
 
+  // Create a brand-new V1 chat session bound to the given pantry. Used by the
+  // empty-state pantry picker. Pass `pantryId = null` for a generic chat with no
+  // pantry context.
+  const createChatWithPantry = useCallback(
+    async (pantryId: number | null, title?: string) => {
+      const userId = getUserId();
+      if (!userId) {
+        setError("Vui lòng đăng nhập để bắt đầu chat");
+        return false;
+      }
+
+      try {
+        const res = await chatService.createSession({
+          userId,
+          pantryId,
+          title: title?.trim() || "Trò chuyện với Bepes",
+        });
+        const created = normalizeSession(extractData(res));
+        if (!created?.chatSessionId) {
+          setError("Không thể tạo phiên chat mới");
+          return false;
+        }
+
+        // Reset meal state because the new session starts fresh in V1 mode.
+        const freshMealSession: MealSessionState = {
+          chatSessionId: null,
+          activeRecipeId: null,
+          needsSelection: false,
+          uiClosed: false,
+        };
+
+        mergeState({
+          currentSessionId: created.chatSessionId,
+          currentSession: created,
+          sessions: [created, ...stateRef.current.sessions.filter((s) => s.chatSessionId !== created.chatSessionId)],
+          timeline: stateRef.current.timeline.filter(
+            (m) => m.chatSessionId !== created.chatSessionId,
+          ),
+          mealSession: freshMealSession,
+          mealItems: [],
+          pendingPrimarySwitch: null,
+          pendingMealPolicyPrompt: null,
+          errorMessage: null,
+          hasMore: false,
+          nextBeforeMessageId: null,
+          lastRequestedBeforeMessageId: null,
+          noProgressLoadCount: 0,
+        });
+        commitMealSnapshot(freshMealSession, [], userId);
+        persistLastSession(created.chatSessionId, userId);
+
+        // Pull the freshly created intro message so the timeline is populated.
+        try {
+          const histRes = await chatService.getSessionHistory(created.chatSessionId);
+          const histData = extractData(histRes);
+          const histMessages = normalizeMessages(histData?.messages, created.chatSessionId);
+          const histSession = normalizeSession(histData?.session) ?? created;
+          mergeState({
+            timeline: mergeAndSortTimeline([], histMessages),
+            currentSession: histSession,
+          });
+        } catch {
+          // best-effort
+        }
+
+        return true;
+      } catch (err: any) {
+        const message =
+          err?.response?.data?.message || "Không thể tạo phiên chat mới";
+        setError(message);
+        return false;
+      }
+    },
+    [commitMealSnapshot, getUserId, mergeState, persistLastSession, setError],
+  );
+
+  // Attach (or detach with `pantryId = null`) a pantry to the currently open
+  // session without spawning a new one. Backend validates owner/editor access.
+  const attachPantryToCurrentSession = useCallback(
+    async (pantryId: number | null) => {
+      const userId = getUserId();
+      const sessionId = stateRef.current.currentSession?.chatSessionId ?? stateRef.current.currentSessionId;
+      if (!userId) {
+        setError("Vui lòng đăng nhập để đổi tủ lạnh");
+        return false;
+      }
+      if (!sessionId) {
+        // No session yet — fall back to creating one with this pantry.
+        return createChatWithPantry(pantryId);
+      }
+
+      try {
+        const res = await chatService.updateSessionPantry(sessionId, pantryId);
+        if (res?.success === false) {
+          const msg = res?.message || "Không thể cập nhật tủ lạnh cho phiên chat";
+          setError(msg);
+          return false;
+        }
+        const updated = normalizeSession(extractData(res));
+        if (!updated) return false;
+
+        mergeState({
+          currentSession: updated,
+          sessions: stateRef.current.sessions.map((s) =>
+            s.chatSessionId === updated.chatSessionId ? { ...s, pantryId: updated.pantryId } : s,
+          ),
+        });
+        toast.success(
+          updated.pantryId === null
+            ? "Đã gỡ tủ lạnh khỏi phiên chat"
+            : "Đã cập nhật tủ lạnh cho phiên chat",
+        );
+        return true;
+      } catch (err: any) {
+        const status = err?.response?.status;
+        const msg = err?.response?.data?.message || "Không thể cập nhật tủ lạnh cho phiên chat";
+        if (status === 403) {
+          setError("Bạn không có quyền dùng tủ lạnh này. Hãy chọn tủ lạnh khác.");
+        } else {
+          setError(msg);
+        }
+        return false;
+      }
+    },
+    [createChatWithPantry, getUserId, mergeState, setError],
+  );
+
   const completeCurrentSession = useCallback(
     async (options: CompleteMealOptions = {}) => {
       const userId = getUserId();
@@ -2373,32 +2624,87 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
               buildLocalCompletionMessage(payload.completionType || "completed", chatSessionId),
             ]);
 
+        // Persist completion message into the now-closed session, then jump back
+        // to a fresh V1 chat with the same pantry context so the user can keep
+        // chatting without being locked out.
+        const completedPantryId = stateRef.current.currentSession?.pantryId ?? null;
+
         mergeState({
           timeline,
-          currentSessionId: nextContext.session?.chatSessionId ?? stateRef.current.currentSessionId,
-          currentSession: nextContext.session
-            ? {
-                ...nextContext.session,
-                activeRecipeId: null,
-              }
-            : stateRef.current.currentSession,
-          mealSession: {
-            ...nextContext.mealSession,
-            activeRecipeId: null,
-            needsSelection: false,
-            uiClosed: true,
-          },
-          mealItems: [],
-          pendingPrimarySwitch: null,
         });
+
+        // Auto-fork a new V1 session for ongoing free chat (best-effort: if it
+        // fails we just keep the closed meal session selected).
+        try {
+          const createRes = await chatService.createSession({
+            userId,
+            pantryId: completedPantryId,
+            title: "Trò chuyện với Bepes",
+          });
+          const newSession = normalizeSession(extractData(createRes));
+          if (newSession?.chatSessionId) {
+            const freshMealSession: MealSessionState = {
+              chatSessionId: null,
+              activeRecipeId: null,
+              needsSelection: false,
+              uiClosed: false,
+            };
+            mergeState({
+              currentSessionId: newSession.chatSessionId,
+              currentSession: newSession,
+              sessions: [newSession, ...stateRef.current.sessions],
+              mealSession: freshMealSession,
+              mealItems: [],
+              pendingPrimarySwitch: null,
+              pendingMealPolicyPrompt: null,
+            });
+            commitMealSnapshot(freshMealSession, [], userId);
+            persistLastSession(newSession.chatSessionId, userId);
+
+            try {
+              const histRes = await chatService.getSessionHistory(newSession.chatSessionId);
+              const histData = extractData(histRes);
+              const histMessages = normalizeMessages(histData?.messages, newSession.chatSessionId);
+              mergeState({
+                timeline: mergeAndSortTimeline(stateRef.current.timeline, histMessages),
+              });
+            } catch {
+              // best-effort
+            }
+          } else {
+            // Fallback: lock the meal session like before so the user knows it's done.
+            mergeState({
+              currentSession: nextContext.session
+                ? { ...nextContext.session, activeRecipeId: null }
+                : stateRef.current.currentSession,
+              mealSession: {
+                ...nextContext.mealSession,
+                activeRecipeId: null,
+                needsSelection: false,
+                uiClosed: true,
+              },
+              mealItems: [],
+              pendingPrimarySwitch: null,
+            });
+          }
+        } catch {
+          mergeState({
+            currentSession: nextContext.session
+              ? { ...nextContext.session, activeRecipeId: null }
+              : stateRef.current.currentSession,
+            mealSession: {
+              ...nextContext.mealSession,
+              activeRecipeId: null,
+              needsSelection: false,
+              uiClosed: true,
+            },
+            mealItems: [],
+            pendingPrimarySwitch: null,
+          });
+        }
         commitMealSnapshot(
-          {
-            ...nextContext.mealSession,
-            activeRecipeId: null,
-            needsSelection: false,
-            uiClosed: true,
-          },
-          [],
+          stateRef.current.mealSession,
+          stateRef.current.mealItems,
           userId,
         );
         toast.success("Đã hoàn tất phiên nấu ăn");
@@ -2512,6 +2818,8 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
       updateMealRecipeStatus,
       confirmPendingPrimarySwitch,
       completeCurrentSession,
+      createChatWithPantry,
+      attachPantryToCurrentSession,
     }),
     [
       state,
@@ -2532,6 +2840,8 @@ export function ChatFlowProvider({ children }: { children: React.ReactNode }) {
       updateMealRecipeStatus,
       confirmPendingPrimarySwitch,
       completeCurrentSession,
+      createChatWithPantry,
+      attachPantryToCurrentSession,
     ],
   );
 
