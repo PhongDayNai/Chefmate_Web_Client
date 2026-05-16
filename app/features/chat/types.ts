@@ -16,6 +16,20 @@ export type MealPolicyPromptMessageStatus = MealPolicyPromptStatus | "resolved";
 export interface ChatSession {
   chatSessionId: number;
   userId?: number;
+  pantryId: number | null;
+  /**
+   * Conversation flow type, derived server-side:
+   *  - "general": chat thường, V1 endpoint, không có meal selection.
+   *  - "meal":    đang trong meal flow V2 (có chosen recipes).
+   */
+  flow?: "general" | "meal";
+  /**
+   * Status of the meal flow when `flow === "meal"`:
+   *  - "active":    còn ít nhất một món ở pending/cooking.
+   *  - "completed": tất cả món đã done/skipped.
+   *  - null:        session không phải meal (flow = "general").
+   */
+  mealStatus?: "active" | "completed" | null;
   title: string;
   activeRecipeId?: number | null;
   createdAt?: string;
@@ -203,15 +217,28 @@ export interface UnifiedTimelineParams {
 }
 
 export interface SendMessagePayload {
+  userId?: number;
   chatSessionId?: number;
   message: string;
   stream?: boolean;
   useUnifiedSession?: boolean;
 }
 
+export interface CreateSessionPayload {
+  userId: number;
+  pantryId?: number | null;
+  title?: string;
+  activeRecipeId?: number | null;
+}
+
 export interface CreateMealSessionPayload {
   title?: string;
   recipeIds: number[];
+  /**
+   * Optional pantry to bind the new meal session to. Inherit this from the V1
+   * session the user was chatting in so AI keeps the same ingredient context.
+   */
+  pantryId?: number | null;
 }
 
 export interface ReplaceMealRecipesPayload {
